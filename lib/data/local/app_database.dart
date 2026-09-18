@@ -105,6 +105,22 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  Future<void> updateTask({
+    required String id,
+    required String title,
+    String? note,
+    DateTime? dueAt,
+  }) {
+    return (update(tasks)..where((task) => task.id.equals(id))).write(
+      TasksCompanion(
+        title: Value(title),
+        note: Value(note),
+        dueAt: Value(dueAt),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
   Future<void> softDeleteTask(String id) {
     return (update(tasks)..where((task) => task.id.equals(id))).write(
       TasksCompanion(

@@ -60,7 +60,8 @@ class TodoHomePage extends StatefulWidget {
 }
 
 class _TodoHomePageState extends State<TodoHomePage> {
-  final _controller = TextEditingController();
+  final _titleController = TextEditingController();
+  final _noteController = TextEditingController();
   bool _isPinned = false;
   bool _isMaximized = false;
 
@@ -79,51 +80,166 @@ class _TodoHomePageState extends State<TodoHomePage> {
 
   @override
   void dispose() {
-    _controller.dispose();
+    _titleController.dispose();
+    _noteController.dispose();
     widget.database.close();
     super.dispose();
   }
 
-  Future<void> _addTask() async {
-    final title = _controller.text.trim();
-    if (title.isEmpty) return;
-    await widget.database.addTask(title: title);
-    _controller.clear();
-  }
-
-  Future<void> _showAddTaskDialog() async {
-    _controller.clear();
+  Future<void> _showTaskEditor({Task? task}) async {
+    _titleController.text = task?.title ?? '';
+    _noteController.text = task?.note ?? '';
+    DateTime? selectedDueAt = task?.dueAt;
     await showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('新增任务'),
-        content: TextField(
-          controller: _controller,
-          autofocus: true,
-          maxLength: 200,
-          decoration: const InputDecoration(
-            hintText: '输入任务内容',
-            border: OutlineInputBorder(),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(task == null ? '新增任务' : '任务详情'),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: _titleController,
+                    autofocus: true,
+                    maxLength: 200,
+                    decoration: const InputDecoration(
+                      labelText: '标题',
+                      hintText: '输入任务内容',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _noteController,
+                    minLines: 3,
+                    maxLines: 6,
+                    maxLength: 2000,
+                    decoration: const InputDecoration(
+                      labelText: '描述/备注（可选）',
+                      hintText: '补充任务说明',
+                      border: OutlineInputBorder(),
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          selectedDueAt == null
+                              ? '截止日期：未设置'
+                              : '截止日期：' + _formatDate(selectedDueAt!),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () async {
+                          final date = await showDatePicker(
+                            context: context,
+                            firstDate: DateTime.now(),
+                            lastDate: DateTime(2100),
+                            initialDate: selectedDueAt != null &&
+                                    selectedDueAt!.isBefore(DateTime.now())
+                                ? DateTime.now()
+                                : selectedDueAt ?? DateTime.now(),
+                          );
+                          if (date != null) {
+                            setDialogState(() => selectedDueAt = date);
+                          }
+                        },
+                        icon: const Icon(Icons.calendar_today_outlined),
+                        label: const Text('选择日期'),
+                      ),
+                      if (selectedDueAt != null)
+                        IconButton(
+                          onPressed: () =>
+                              setDialogState(() => selectedDueAt = null),
+                          icon: const Icon(Icons.clear),
+                          tooltip: '清除日期',
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ),
-          onSubmitted: (_) async {
-            await _addTask();
-            if (context.mounted) Navigator.pop(context);
-          },
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final title = _titleController.text.trim();
+                if (title.isEmpty) return;
+                final note = _noteController.text.trim();
+                if (task == null) {
+                  await widget.database.addTask(
+                    title: title,
+                    note: note.isEmpty ? null : note,
+                    dueAt: selectedDueAt,
+                  );
+                } else {
+                  await widget.database.updateTask(
+                    id: task.id,
+                    title: title,
+                    note: note.isEmpty ? null : note,
+                    dueAt: selectedDueAt,
+                  );
+                }
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+              },
+              child: Text(task == null ? '添加' : '保存'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              await _addTask();
-              if (context.mounted) Navigator.pop(context);
-            },
-            child: const Text('添加'),
-          ),
-        ],
       ),
+    );
+  }
+
+  Future<void> _showTaskMenu(Task task, Offset position) async {
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        MediaQuery.of(context).size.width - position.dx,
+        MediaQuery.of(context).size.height - position.dy,
+      ),
+      items: const [
+        PopupMenuItem(value: 'edit', child: Text('查看详情 / 编辑')),
+        PopupMenuItem(value: 'delete', child: Text('移入回收站')),
+      ],
+    );
+    if (!mounted) return;
+    if (selected == 'edit') {
+      await _showTaskEditor(task: task);
+    } else if (selected == 'delete') {
+      await widget.database.softDeleteTask(task.id);
+    }
+  }
+
+  String _formatDate(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return date.year.toString() + '-' + month + '-' + day;
+  }
+
+  Widget? _buildTaskSubtitle(Task task) {
+    final details = <String>[];
+    if (task.note != null && task.note!.trim().isNotEmpty) {
+      details.add(task.note!.trim());
+    }
+    if (task.dueAt != null) {
+      details.add('截止：' + _formatDate(task.dueAt!));
+    }
+    if (details.isEmpty) return null;
+    return Text(
+      details.join('  ·  '),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
     );
   }
 
@@ -251,7 +367,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
                       ),
                     ),
                   IconButton(
-                    onPressed: _showAddTaskDialog,
+                    onPressed: () => _showTaskEditor(),
                     icon: const Icon(Icons.add),
                     tooltip: '新增任务',
                   ),
@@ -281,7 +397,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
         child: _buildWindowTitleBar(),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showAddTaskDialog,
+        onPressed: () => _showTaskEditor(),
         icon: const Icon(Icons.add),
         label: const Text('新增任务'),
       ),
@@ -313,30 +429,37 @@ class _TodoHomePageState extends State<TodoHomePage> {
                               separatorBuilder: (_, _) => const SizedBox(height: 8),
                               itemBuilder: (context, index) {
                                 final task = tasks[index];
-                                return Card(
-                                  elevation: 0,
-                                  child: CheckboxListTile(
-                                    value: task.completed,
-                                    controlAffinity:
-                                        ListTileControlAffinity.leading,
-                                    title: Text(
-                                      task.title,
-                                      style: TextStyle(
-                                        decoration: task.completed
-                                            ? TextDecoration.lineThrough
-                                            : null,
+                                return GestureDetector(
+                                  onSecondaryTapDown: (details) =>
+                                      _showTaskMenu(task, details.globalPosition),
+                                  onLongPress: () => _showTaskEditor(task: task),
+                                  child: Card(
+                                    elevation: 0,
+                                    child: CheckboxListTile(
+                                      value: task.completed,
+                                      controlAffinity:
+                                          ListTileControlAffinity.leading,
+                                      title: Text(
+                                        task.title,
+                                        style: TextStyle(
+                                          decoration: task.completed
+                                              ? TextDecoration.lineThrough
+                                              : null,
+                                        ),
                                       ),
-                                    ),
-                                    onChanged: (value) =>
-                                        widget.database.setTaskCompleted(
-                                      task.id,
-                                      value ?? false,
-                                    ),
-                                    secondary: IconButton(
-                                      onPressed: () => widget.database
-                                          .softDeleteTask(task.id),
-                                      icon: const Icon(Icons.delete_outline),
-                                      tooltip: '移入回收站',
+                                      subtitle: _buildTaskSubtitle(task),
+                                      onChanged: (value) =>
+                                          widget.database.setTaskCompleted(
+                                        task.id,
+                                        value ?? false,
+                                      ),
+                                      secondary: IconButton(
+                                        onPressed: () => widget.database
+                                            .softDeleteTask(task.id),
+                                        icon:
+                                            const Icon(Icons.delete_outline),
+                                        tooltip: '移入回收站',
+                                      ),
                                     ),
                                   ),
                                 );
