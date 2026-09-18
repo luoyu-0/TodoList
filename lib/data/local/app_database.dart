@@ -23,6 +23,7 @@ class Tasks extends Table {
   TextColumn get note => text().nullable()();
   BoolColumn get completed => boolean().withDefault(const Constant(false))();
   IntColumn get priority => integer().withDefault(const Constant(0))();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
   DateTimeColumn get dueAt => dateTime().nullable()();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
@@ -53,7 +54,17 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.test() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (Migrator m) => m.createAll(),
+        onUpgrade: (Migrator m, int from, int to) async {
+          if (from < 2) {
+            await m.addColumn(tasks, tasks.sortOrder);
+          }
+        },
+      );
 
   Stream<List<Task>> watchInbox() {
     final query = select(tasks)
@@ -69,6 +80,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<void> ensureDefaultList() async {
+    await purgeExpiredTrash();
     final existing = await (select(taskLists)..limit(1)).getSingleOrNull();
     if (existing != null) return;
     await into(taskLists).insert(
@@ -121,6 +133,20 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  Future<void> updateTaskOrder(List<String> taskIds) async {
+    await transaction(() async {
+      for (var index = 0; index < taskIds.length; index++) {
+        await (update(tasks)..where((task) => task.id.equals(taskIds[index])))
+            .write(
+          TasksCompanion(
+            sortOrder: Value(index),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
+      }
+    });
+  }
+
   Future<void> softDeleteTask(String id) {
     return (update(tasks)..where((task) => task.id.equals(id))).write(
       TasksCompanion(
@@ -128,6 +154,57 @@ class AppDatabase extends _$AppDatabase {
         updatedAt: Value(DateTime.now()),
       ),
     );
+  }
+
+  Stream<List<Task>> watchTrash() {
+    final query = select(tasks)
+      ..where((task) => task.deletedAt.isNotNull())
+      ..orderBy([
+        (task) => OrderingTerm(
+              expression: task.deletedAt,
+              mode: OrderingMode.desc,
+            ),
+      ]);
+    return query.watch();
+  }
+
+  Future<void> restoreTask(String id) {
+    return (update(tasks)..where((task) => task.id.equals(id))).write(
+      TasksCompanion(
+        deletedAt: const Value(null),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  Future<void> permanentlyDeleteTask(String id) {
+    return (delete(tasks)..where((task) => task.id.equals(id))).go();
+  }
+
+  Future<void> purgeExpiredTrash() async {
+    final cutoff = DateTime.now().subtract(const Duration(days: 30));
+    final expired = await (select(tasks)
+          ..where(
+            (task) =>
+                task.deletedAt.isNotNull() &
+                task.deletedAt.isSmallerThanValue(cutoff),
+          ))
+        .get();
+    if (expired.isEmpty) return;
+    await permanentlyDeleteTasks(expired.map((task) => task.id));
+  }
+
+  Future<void> permanentlyDeleteTasks(Iterable<String> ids) async {
+    final taskIds = ids.toList();
+    if (taskIds.isEmpty) return;
+    await transaction(() async {
+      for (final id in taskIds) {
+        await (delete(taskAttachments)
+              ..where((attachment) => attachment.taskId.equals(id)))
+            .go();
+        await (delete(tasks)..where((task) => task.id.equals(id))).go();
+      }
+    });
   }
 }
 
