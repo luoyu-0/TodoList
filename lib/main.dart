@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:tray_manager/tray_manager.dart' as tray;
 import 'package:window_manager/window_manager.dart';
 
 import 'data/local/app_database.dart';
@@ -13,10 +14,86 @@ enum TaskSortMode {
   manual,
 }
 
+bool _isPinnedWindow = false;
+
+class _TodoListTrayController {
+  late final tray.TrayIcon _trayIcon;
+
+  Future<void> initialize() async {
+    _trayIcon = tray.TrayIcon.create()!;
+    _trayIcon.icon = tray.ImageAsset.fromAsset('assets/todolist.ico');
+    _trayIcon.setTooltip('TodoList');
+
+    final menu = tray.Menu.create()!;
+    final showWindowItem = tray.MenuItem.createWithLabelAndType(
+      '打开 TodoList',
+      tray.MenuItemType.normal,
+    )!;
+    showWindowItem.addListener((event) {
+      if (event is tray.MenuItemClickedEvent) {
+        _showWindow();
+      }
+    });
+    final exitItem = tray.MenuItem.createWithLabelAndType(
+      '退出 TodoList',
+      tray.MenuItemType.normal,
+    )!;
+    exitItem.addListener((event) {
+      if (event is tray.MenuItemClickedEvent) {
+        _exitApplication();
+      }
+    });
+    menu.addItem(showWindowItem);
+    menu.addSeparator();
+    menu.addItem(exitItem);
+    _trayIcon.setContextMenu(menu);
+    _trayIcon.setContextMenuTrigger(tray.ContextMenuTrigger.rightClicked);
+    _trayIcon.addListener((event) {
+      if (event is tray.TrayIconClickedEvent) {
+        _showWindow();
+      }
+    });
+    _trayIcon.setVisible(true);
+  }
+
+  void dispose() {
+    _trayIcon.dispose();
+  }
+
+  Future<void> _showWindow() async {
+    if (!_isPinnedWindow) {
+      await windowManager.setSkipTaskbar(false);
+    }
+    await windowManager.show();
+    await windowManager.restore();
+    await windowManager.focus();
+  }
+
+  Future<void> _exitApplication() async {
+    _trayIcon.dispose();
+    await windowManager.setPreventClose(false);
+    await windowManager.destroy();
+  }
+}
+
+class _TodoListWindowListener extends WindowListener {
+  @override
+  Future<void> onWindowClose() async {
+    if (await windowManager.isPreventClose()) {
+      await windowManager.setSkipTaskbar(true);
+      await windowManager.hide();
+    }
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (Platform.isWindows) {
     await windowManager.ensureInitialized();
+    final trayController = _TodoListTrayController();
+    await trayController.initialize();
+    windowManager.addListener(_TodoListWindowListener());
+    await windowManager.setPreventClose(true);
     await windowManager.setTitleBarStyle(
       TitleBarStyle.hidden,
       windowButtonVisibility: false,
@@ -339,12 +416,14 @@ class _TodoHomePageState extends State<TodoHomePage> {
       _lastPinnedAlwaysOnTop = await windowManager.isAlwaysOnTop();
       await windowManager.setAlwaysOnTop(false);
       await windowManager.setResizable(true);
+      await windowManager.setSkipTaskbar(false);
       await windowManager.setSize(const Size(1024, 720));
       await windowManager.center();
       _pinnedHiddenTaskIds.clear();
     } else {
       await windowManager.setAlwaysOnTop(_lastPinnedAlwaysOnTop);
       await windowManager.setResizable(true);
+      await windowManager.setSkipTaskbar(false);
       await windowManager.setSize(_lastPinnedSize ?? const Size(260, 320));
       if (_lastPinnedPosition != null) {
         await windowManager.setPosition(_lastPinnedPosition!);
@@ -352,7 +431,11 @@ class _TodoHomePageState extends State<TodoHomePage> {
         await windowManager.setPosition(const Offset(64, 120));
       }
     }
-    if (mounted) setState(() => _isPinned = !_isPinned);
+    _isPinnedWindow = !_isPinned;
+    if (_isPinnedWindow) {
+      await windowManager.setSkipTaskbar(true);
+    }
+    if (mounted) setState(() => _isPinned = _isPinnedWindow);
   }
 
   Future<void> _toggleMaximized() async {
@@ -462,7 +545,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
               ),
               _WindowControlButton(
                 icon: Icons.close,
-                tooltip: '退出',
+                tooltip: '隐藏到系统托盘',
                 onPressed: _closeWindow,
                 isClose: true,
               ),

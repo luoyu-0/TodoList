@@ -13,11 +13,31 @@
 - 云端：MySQL + 轻量 REST API；不引入复杂云端业务逻辑。
 - 使用方式：只需构建可安装的 Android APK 与 Windows 桌面程序，不考虑应用商店发布。
 
-这是可调整的初稿，正式开发前请确认 [docs/00-待确认决策.md](./docs/00-待确认决策.md)。
+这是可调整的初稿。当前 MVP 暂缓云端账号、云端存储和多设备同步，先完成本地功能；后续方案见 [docs/00-待确认决策.md](./docs/00-待确认决策.md)。
 
 ## 开发启动
 
 需要 Windows 11、Flutter stable、Dart、Android Studio/Android SDK、Visual Studio 2022（安装“使用 C++ 的桌面开发”组件）、Git，以及可访问的 MySQL 和 REST API 服务。
+
+### Windows 运行要求
+
+Windows 端最终用户不需要安装 Flutter、Android Studio 或 Visual Studio，但需要系统具备 Microsoft Visual C++ v14 x64 运行库。部分 Windows 电脑已经安装，但系统不保证一定包含满足当前程序的版本。
+
+如果程序启动时提示缺少 VCRUNTIME140.dll、MSVCP140.dll 等文件，请从微软官方下载并安装：
+
+[Microsoft Visual C++ Redistributable x64](https://aka.ms/vc14/vc_redist.x64.exe)
+
+当前 Windows 安装包会自动检测运行库；如果缺少运行库，安装向导会从微软官方地址下载并静默安装。直接运行未打包的 Release 程序时，仍可按上面的链接手动安装。
+
+### Windows 安装包
+
+安装包配置位于 [installer](./installer/)。安装 Inno Setup 7 后，在项目根目录执行：
+
+~~~powershell
+.\installer\build-installer.ps1
+~~~
+
+安装向导支持安装目录选择、开始菜单快捷方式、可选桌面快捷方式、安装完成后启动应用和标准卸载。详细说明见 [installer/README.md](./installer/README.md)。
 
 代码骨架建立后，常用命令：
 
