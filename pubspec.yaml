@@ -38,6 +38,7 @@ dependencies:
   path_provider: ^2.1.5
   window_manager: ^0.5.1
   tray_manager: ^0.7.0
+  fluentui_system_icons: ^1.1.273
 
 dev_dependencies:
   flutter_test:

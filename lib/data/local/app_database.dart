@@ -7,6 +7,7 @@ part 'app_database.g.dart';
 class TaskLists extends Table {
   TextColumn get id => text()();
   TextColumn get name => text().withLength(min: 1, max: 120)();
+  TextColumn get sortMode => text().withDefault(const Constant('createdAt'))();
   BoolColumn get archived => boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
@@ -54,7 +55,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.test() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -62,6 +63,9 @@ class AppDatabase extends _$AppDatabase {
         onUpgrade: (Migrator m, int from, int to) async {
           if (from < 2) {
             await m.addColumn(tasks, tasks.sortOrder);
+          }
+          if (from < 3) {
+            await m.addColumn(taskLists, taskLists.sortMode);
           }
         },
       );
@@ -88,6 +92,20 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  Future<String> getSortMode() async {
+    final list = await (select(taskLists)
+          ..where((item) => item.id.equals('inbox'))
+          ..limit(1))
+        .getSingleOrNull();
+    return list?.sortMode ?? 'createdAt';
+  }
+
+  Future<void> setSortMode(String sortMode) {
+    return (update(taskLists)..where((item) => item.id.equals('inbox'))).write(
+      TaskListsCompanion(sortMode: Value(sortMode)),
+    );
+  }
+
   Future<void> addTask({
     required String title,
     String? note,
@@ -95,6 +113,16 @@ class AppDatabase extends _$AppDatabase {
     int priority = 0,
     DateTime? dueAt,
   }) async {
+    final lastTask = await (select(tasks)
+          ..where((task) => task.deletedAt.isNull())
+          ..orderBy([
+            (task) => OrderingTerm(
+                  expression: task.sortOrder,
+                  mode: OrderingMode.desc,
+                ),
+          ])
+          ..limit(1))
+        .getSingleOrNull();
     await into(tasks).insert(
       TasksCompanion.insert(
         id: DateTime.now().microsecondsSinceEpoch.toString(),
@@ -103,6 +131,7 @@ class AppDatabase extends _$AppDatabase {
         note: Value(note),
         parentTaskId: Value(parentTaskId),
         priority: Value(priority),
+        sortOrder: Value((lastTask?.sortOrder ?? -1) + 1),
         dueAt: Value(dueAt),
       ),
     );
@@ -140,7 +169,6 @@ class AppDatabase extends _$AppDatabase {
             .write(
           TasksCompanion(
             sortOrder: Value(index),
-            updatedAt: Value(DateTime.now()),
           ),
         );
       }

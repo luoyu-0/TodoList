@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:tray_manager/tray_manager.dart' as tray;
 import 'package:window_manager/window_manager.dart';
 
@@ -15,9 +16,11 @@ enum TaskSortMode {
 }
 
 bool _isPinnedWindow = false;
+Future<void> Function()? _beforeApplicationExit;
 
 class _TodoListTrayController {
   late final tray.TrayIcon _trayIcon;
+  bool _isExiting = false;
 
   Future<void> initialize() async {
     _trayIcon = tray.TrayIcon.create()!;
@@ -69,10 +72,24 @@ class _TodoListTrayController {
     await windowManager.focus();
   }
 
-  Future<void> _exitApplication() async {
-    _trayIcon.dispose();
-    await windowManager.setPreventClose(false);
-    await windowManager.destroy();
+  void _exitApplication() {
+    if (_isExiting) return;
+    _isExiting = true;
+    unawaited(_exitApplicationAsync());
+  }
+
+  Future<void> _exitApplicationAsync() async {
+    // 先让窗口和托盘立即消失，避免等待窗口销毁时看起来像卡死。
+    unawaited(windowManager.hide());
+    _trayIcon.setVisible(false);
+    // 托盘菜单回调仍在原生事件中执行，延迟销毁以避免中断当前菜单事件。
+    Timer.run(_trayIcon.dispose);
+    try {
+      await _beforeApplicationExit?.call();
+    } finally {
+      // 保存完成后直接结束进程，避免 window_manager.destroy 等待原生消息循环。
+      exit(0);
+    }
   }
 }
 
@@ -153,19 +170,33 @@ class _TodoHomePageState extends State<TodoHomePage> {
   TaskSortMode _sortMode = TaskSortMode.createdAt;
   final _selectedTrashIds = <String>{};
   final _pinnedHiddenTaskIds = <String>{};
+  final _manualTaskOrder = <String>[];
+  bool _manualOrderDirty = false;
   Offset? _lastPinnedPosition;
   Size? _lastPinnedSize;
   bool _lastPinnedAlwaysOnTop = true;
+  bool _isAlwaysOnTop = false;
   Timer? _trashCleanupTimer;
 
   @override
   void initState() {
     super.initState();
+    _beforeApplicationExit = _prepareForApplicationExit;
     _loadWindowState();
+    _loadSortMode();
     _trashCleanupTimer = Timer.periodic(
       const Duration(hours: 24),
       (_) => widget.database.purgeExpiredTrash(),
     );
+  }
+
+  Future<void> _loadSortMode() async {
+    final value = await widget.database.getSortMode();
+    final mode = TaskSortMode.values.firstWhere(
+      (item) => item.name == value,
+      orElse: () => TaskSortMode.createdAt,
+    );
+    if (mounted) setState(() => _sortMode = mode);
   }
 
   Future<void> _loadWindowState() async {
@@ -177,6 +208,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
 
   @override
   void dispose() {
+    _beforeApplicationExit = null;
     _titleController.dispose();
     _noteController.dispose();
     _trashCleanupTimer?.cancel();
@@ -334,6 +366,19 @@ class _TodoHomePageState extends State<TodoHomePage> {
 
   List<Task> _sortTasks(Iterable<Task> source) {
     final result = source.toList();
+    if (_sortMode == TaskSortMode.manual) {
+      if (_manualTaskOrder.isEmpty) {
+        final persistedOrder = [...result]
+          ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+        _manualTaskOrder.addAll(persistedOrder.map((task) => task.id));
+      } else {
+        for (final task in result) {
+          if (!_manualTaskOrder.contains(task.id)) {
+            _manualTaskOrder.add(task.id);
+          }
+        }
+      }
+    }
     result.sort((a, b) {
       if (a.completed != b.completed) {
         return a.completed ? 1 : -1;
@@ -347,6 +392,13 @@ class _TodoHomePageState extends State<TodoHomePage> {
           if (b.dueAt == null) return -1;
           return a.dueAt!.compareTo(b.dueAt!);
         case TaskSortMode.manual:
+          final aIndex = _manualTaskOrder.indexOf(a.id);
+          final bIndex = _manualTaskOrder.indexOf(b.id);
+          if (aIndex != -1 && bIndex != -1) {
+            return aIndex.compareTo(bIndex);
+          }
+          if (aIndex != -1) return -1;
+          if (bIndex != -1) return 1;
           return a.sortOrder.compareTo(b.sortOrder);
         case TaskSortMode.createdAt:
           return b.createdAt.compareTo(a.createdAt);
@@ -372,10 +424,27 @@ class _TodoHomePageState extends State<TodoHomePage> {
     final reordered = [...tasks];
     final task = reordered.removeAt(oldIndex);
     reordered.insert(newIndex, task);
-    setState(() => _sortMode = TaskSortMode.manual);
-    await widget.database.updateTaskOrder(
-      reordered.map((item) => item.id).toList(),
-    );
+    _manualTaskOrder
+      ..clear()
+      ..addAll(reordered.map((item) => item.id));
+    _manualOrderDirty = true;
+    if (_sortMode != TaskSortMode.manual) {
+      setState(() => _sortMode = TaskSortMode.manual);
+      await widget.database.setSortMode(TaskSortMode.manual.name);
+    } else {
+      setState(() {});
+    }
+  }
+
+  Future<void> _flushPendingTaskOrder() async {
+    if (!_manualOrderDirty || _manualTaskOrder.isEmpty) return;
+    await widget.database.updateTaskOrder(_manualTaskOrder);
+    _manualOrderDirty = false;
+  }
+
+  Future<void> _prepareForApplicationExit() async {
+    await _flushPendingTaskOrder();
+    await widget.database.close();
   }
 
   Widget? _buildTaskSubtitle(Task task) {
@@ -431,11 +500,24 @@ class _TodoHomePageState extends State<TodoHomePage> {
         await windowManager.setPosition(const Offset(64, 120));
       }
     }
+    if (!_isPinned) {
+      await windowManager.setAlwaysOnTop(true);
+      _isAlwaysOnTop = true;
+    } else {
+      _isAlwaysOnTop = _lastPinnedAlwaysOnTop;
+    }
     _isPinnedWindow = !_isPinned;
     if (_isPinnedWindow) {
       await windowManager.setSkipTaskbar(true);
     }
     if (mounted) setState(() => _isPinned = _isPinnedWindow);
+  }
+
+  Future<void> _toggleAlwaysOnTop() async {
+    if (!Platform.isWindows) return;
+    final nextValue = !await windowManager.isAlwaysOnTop();
+    await windowManager.setAlwaysOnTop(nextValue);
+    if (mounted) setState(() => _isAlwaysOnTop = nextValue);
   }
 
   Future<void> _toggleMaximized() async {
@@ -529,7 +611,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
             ),
             IconButton(
               onPressed: _togglePinned,
-              icon: const Icon(Icons.push_pin_outlined, size: 18),
+              icon: const Icon(Icons.push_pin, size: 18),
               tooltip: '固定到桌面',
             ),
             if (Platform.isWindows) ...[
@@ -598,9 +680,20 @@ class _TodoHomePageState extends State<TodoHomePage> {
                         tooltip: '最小化',
                       ),
                       IconButton(
+                        onPressed: _toggleAlwaysOnTop,
+                        icon: Icon(
+                          _isAlwaysOnTop
+                              ? FluentIcons.pin_off_24_regular
+                              : FluentIcons.pin_24_regular,
+                        ),
+                        tooltip: _isAlwaysOnTop ? '取消始终置顶' : '始终置顶',
+                      ),
+                      IconButton(
                         onPressed: _togglePinned,
-                        icon: const Icon(Icons.push_pin),
-                        tooltip: '取消固定',
+                        icon: const Icon(
+                          Icons.push_pin,
+                        ),
+                        tooltip: '返回正常窗口',
                       ),
                     ],
                   ),
@@ -818,8 +911,10 @@ class _TodoHomePageState extends State<TodoHomePage> {
                             borderRadius: BorderRadius.circular(14),
                           ),
                           menuPadding: EdgeInsets.zero,
-                          onSelected: (value) =>
-                              setState(() => _sortMode = value),
+                          onSelected: (value) async {
+                            setState(() => _sortMode = value);
+                            await widget.database.setSortMode(value.name);
+                          },
                           itemBuilder: (context) => const [
                             PopupMenuItem(
                               value: TaskSortMode.createdAt,

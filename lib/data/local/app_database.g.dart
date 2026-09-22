@@ -31,6 +31,18 @@ class $TaskListsTable extends TaskLists
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _sortModeMeta = const VerificationMeta(
+    'sortMode',
+  );
+  @override
+  late final GeneratedColumn<String> sortMode = GeneratedColumn<String>(
+    'sort_mode',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('createdAt'),
+  );
   static const VerificationMeta _archivedMeta = const VerificationMeta(
     'archived',
   );
@@ -74,6 +86,7 @@ class $TaskListsTable extends TaskLists
   List<GeneratedColumn> get $columns => [
     id,
     name,
+    sortMode,
     archived,
     createdAt,
     updatedAt,
@@ -102,6 +115,12 @@ class $TaskListsTable extends TaskLists
       );
     } else if (isInserting) {
       context.missing(_nameMeta);
+    }
+    if (data.containsKey('sort_mode')) {
+      context.handle(
+        _sortModeMeta,
+        sortMode.isAcceptableOrUnknown(data['sort_mode']!, _sortModeMeta),
+      );
     }
     if (data.containsKey('archived')) {
       context.handle(
@@ -138,6 +157,10 @@ class $TaskListsTable extends TaskLists
         DriftSqlType.string,
         data['${effectivePrefix}name'],
       )!,
+      sortMode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sort_mode'],
+      )!,
       archived: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}archived'],
@@ -162,12 +185,14 @@ class $TaskListsTable extends TaskLists
 class TaskList extends DataClass implements Insertable<TaskList> {
   final String id;
   final String name;
+  final String sortMode;
   final bool archived;
   final DateTime createdAt;
   final DateTime updatedAt;
   const TaskList({
     required this.id,
     required this.name,
+    required this.sortMode,
     required this.archived,
     required this.createdAt,
     required this.updatedAt,
@@ -177,6 +202,7 @@ class TaskList extends DataClass implements Insertable<TaskList> {
     final map = <String, Expression>{};
     map['id'] = Variable<String>(id);
     map['name'] = Variable<String>(name);
+    map['sort_mode'] = Variable<String>(sortMode);
     map['archived'] = Variable<bool>(archived);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
@@ -187,6 +213,7 @@ class TaskList extends DataClass implements Insertable<TaskList> {
     return TaskListsCompanion(
       id: Value(id),
       name: Value(name),
+      sortMode: Value(sortMode),
       archived: Value(archived),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
@@ -201,6 +228,7 @@ class TaskList extends DataClass implements Insertable<TaskList> {
     return TaskList(
       id: serializer.fromJson<String>(json['id']),
       name: serializer.fromJson<String>(json['name']),
+      sortMode: serializer.fromJson<String>(json['sortMode']),
       archived: serializer.fromJson<bool>(json['archived']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
@@ -212,6 +240,7 @@ class TaskList extends DataClass implements Insertable<TaskList> {
     return <String, dynamic>{
       'id': serializer.toJson<String>(id),
       'name': serializer.toJson<String>(name),
+      'sortMode': serializer.toJson<String>(sortMode),
       'archived': serializer.toJson<bool>(archived),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
@@ -221,12 +250,14 @@ class TaskList extends DataClass implements Insertable<TaskList> {
   TaskList copyWith({
     String? id,
     String? name,
+    String? sortMode,
     bool? archived,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) => TaskList(
     id: id ?? this.id,
     name: name ?? this.name,
+    sortMode: sortMode ?? this.sortMode,
     archived: archived ?? this.archived,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -235,6 +266,7 @@ class TaskList extends DataClass implements Insertable<TaskList> {
     return TaskList(
       id: data.id.present ? data.id.value : this.id,
       name: data.name.present ? data.name.value : this.name,
+      sortMode: data.sortMode.present ? data.sortMode.value : this.sortMode,
       archived: data.archived.present ? data.archived.value : this.archived,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
@@ -246,6 +278,7 @@ class TaskList extends DataClass implements Insertable<TaskList> {
     return (StringBuffer('TaskList(')
           ..write('id: $id, ')
           ..write('name: $name, ')
+          ..write('sortMode: $sortMode, ')
           ..write('archived: $archived, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -254,13 +287,15 @@ class TaskList extends DataClass implements Insertable<TaskList> {
   }
 
   @override
-  int get hashCode => Object.hash(id, name, archived, createdAt, updatedAt);
+  int get hashCode =>
+      Object.hash(id, name, sortMode, archived, createdAt, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is TaskList &&
           other.id == this.id &&
           other.name == this.name &&
+          other.sortMode == this.sortMode &&
           other.archived == this.archived &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
@@ -269,6 +304,7 @@ class TaskList extends DataClass implements Insertable<TaskList> {
 class TaskListsCompanion extends UpdateCompanion<TaskList> {
   final Value<String> id;
   final Value<String> name;
+  final Value<String> sortMode;
   final Value<bool> archived;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
@@ -276,6 +312,7 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
   const TaskListsCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
+    this.sortMode = const Value.absent(),
     this.archived = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -284,6 +321,7 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
   TaskListsCompanion.insert({
     required String id,
     required String name,
+    this.sortMode = const Value.absent(),
     this.archived = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -293,6 +331,7 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
   static Insertable<TaskList> custom({
     Expression<String>? id,
     Expression<String>? name,
+    Expression<String>? sortMode,
     Expression<bool>? archived,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
@@ -301,6 +340,7 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (name != null) 'name': name,
+      if (sortMode != null) 'sort_mode': sortMode,
       if (archived != null) 'archived': archived,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -311,6 +351,7 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
   TaskListsCompanion copyWith({
     Value<String>? id,
     Value<String>? name,
+    Value<String>? sortMode,
     Value<bool>? archived,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
@@ -319,6 +360,7 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
     return TaskListsCompanion(
       id: id ?? this.id,
       name: name ?? this.name,
+      sortMode: sortMode ?? this.sortMode,
       archived: archived ?? this.archived,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -334,6 +376,9 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
     }
     if (name.present) {
       map['name'] = Variable<String>(name.value);
+    }
+    if (sortMode.present) {
+      map['sort_mode'] = Variable<String>(sortMode.value);
     }
     if (archived.present) {
       map['archived'] = Variable<bool>(archived.value);
@@ -355,6 +400,7 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
     return (StringBuffer('TaskListsCompanion(')
           ..write('id: $id, ')
           ..write('name: $name, ')
+          ..write('sortMode: $sortMode, ')
           ..write('archived: $archived, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
@@ -1654,6 +1700,7 @@ typedef $$TaskListsTableCreateCompanionBuilder =
     TaskListsCompanion Function({
       required String id,
       required String name,
+      Value<String> sortMode,
       Value<bool> archived,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -1663,6 +1710,7 @@ typedef $$TaskListsTableUpdateCompanionBuilder =
     TaskListsCompanion Function({
       Value<String> id,
       Value<String> name,
+      Value<String> sortMode,
       Value<bool> archived,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -1685,6 +1733,11 @@ class $$TaskListsTableFilterComposer
 
   ColumnFilters<String> get name => $composableBuilder(
     column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sortMode => $composableBuilder(
+    column: $table.sortMode,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1723,6 +1776,11 @@ class $$TaskListsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get sortMode => $composableBuilder(
+    column: $table.sortMode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<bool> get archived => $composableBuilder(
     column: $table.archived,
     builder: (column) => ColumnOrderings(column),
@@ -1753,6 +1811,9 @@ class $$TaskListsTableAnnotationComposer
 
   GeneratedColumn<String> get name =>
       $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get sortMode =>
+      $composableBuilder(column: $table.sortMode, builder: (column) => column);
 
   GeneratedColumn<bool> get archived =>
       $composableBuilder(column: $table.archived, builder: (column) => column);
@@ -1794,6 +1855,7 @@ class $$TaskListsTableTableManager
               ({
                 Value<String> id = const Value.absent(),
                 Value<String> name = const Value.absent(),
+                Value<String> sortMode = const Value.absent(),
                 Value<bool> archived = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -1801,6 +1863,7 @@ class $$TaskListsTableTableManager
               }) => TaskListsCompanion(
                 id: id,
                 name: name,
+                sortMode: sortMode,
                 archived: archived,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -1810,6 +1873,7 @@ class $$TaskListsTableTableManager
               ({
                 required String id,
                 required String name,
+                Value<String> sortMode = const Value.absent(),
                 Value<bool> archived = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -1817,6 +1881,7 @@ class $$TaskListsTableTableManager
               }) => TaskListsCompanion.insert(
                 id: id,
                 name: name,
+                sortMode: sortMode,
                 archived: archived,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
