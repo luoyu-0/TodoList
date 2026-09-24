@@ -212,7 +212,6 @@ class _TodoHomePageState extends State<TodoHomePage> {
     _titleController.dispose();
     _noteController.dispose();
     _trashCleanupTimer?.cancel();
-    widget.database.close();
     super.dispose();
   }
 
@@ -434,6 +433,9 @@ class _TodoHomePageState extends State<TodoHomePage> {
     } else {
       setState(() {});
     }
+    if (!Platform.isWindows) {
+      await _flushPendingTaskOrder();
+    }
   }
 
   Future<void> _flushPendingTaskOrder() async {
@@ -586,6 +588,30 @@ class _TodoHomePageState extends State<TodoHomePage> {
     if (mounted) setState(() => _selectedTrashIds.removeAll(taskIds));
   }
 
+  PreferredSizeWidget _buildAppBar() {
+    if (!Platform.isWindows) {
+      return AppBar(
+        title: const Text(
+          'TodoList',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+        ),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        surfaceTintColor: Colors.transparent,
+        actions: [
+          IconButton(
+            onPressed: _toggleTrash,
+            icon: const Icon(Icons.delete_sweep_outlined),
+            tooltip: '回收站',
+          ),
+        ],
+      );
+    }
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(44),
+      child: _buildWindowTitleBar(),
+    );
+  }
+
   Widget _buildWindowTitleBar() {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -609,12 +635,12 @@ class _TodoHomePageState extends State<TodoHomePage> {
               icon: const Icon(Icons.delete_sweep_outlined, size: 18),
               tooltip: '回收站',
             ),
-            IconButton(
-              onPressed: _togglePinned,
-              icon: const Icon(Icons.push_pin, size: 18),
-              tooltip: '固定到桌面',
-            ),
             if (Platform.isWindows) ...[
+              IconButton(
+                onPressed: _togglePinned,
+                icon: const Icon(Icons.push_pin, size: 18),
+                tooltip: '固定到桌面',
+              ),
               _WindowControlButton(
                 icon: Icons.remove,
                 tooltip: '最小化',
@@ -748,10 +774,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
 
   Widget _buildTrashPage() {
     return Scaffold(
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(44),
-        child: _buildWindowTitleBar(),
-      ),
+      appBar: _buildAppBar(),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 900),
@@ -872,10 +895,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
 
   Widget _buildMainPage() {
     return Scaffold(
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(44),
-        child: _buildWindowTitleBar(),
-      ),
+      appBar: _buildAppBar(),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showTaskEditor(),
         icon: const Icon(Icons.add),
@@ -985,7 +1005,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
                       child: orderedTasks.isEmpty
                           ? const Center(child: Text('暂无待办，点击右下角新增任务'))
                           : ReorderableListView.builder(
-                              buildDefaultDragHandles: true,
+                              buildDefaultDragHandles: Platform.isWindows,
                               proxyDecorator: (child, index, animation) => child,
                               itemCount: orderedTasks.length,
                               onReorderItem: (oldIndex, newIndex) =>
@@ -996,8 +1016,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
                               ),
                               itemBuilder: (context, index) {
                                 final task = orderedTasks[index];
-                                return Card(
-                                  key: ValueKey(task.id),
+                                final taskCard = Card(
                                   elevation: 0,
                                   margin: EdgeInsets.zero,
                                   color: const Color(0xFFF7F1FC),
@@ -1011,16 +1030,18 @@ class _TodoHomePageState extends State<TodoHomePage> {
                                       task,
                                       details.globalPosition,
                                     ),
-                                    onLongPress: () =>
-                                        _showTaskEditor(task: task),
-                                    child: CheckboxListTile(
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(16),
+                                    child: ListTile(
+                                      onTap: Platform.isAndroid
+                                          ? () => _showTaskEditor(task: task)
+                                          : null,
+                                      leading: Checkbox(
+                                        value: task.completed,
+                                        onChanged: (value) =>
+                                            widget.database.setTaskCompleted(
+                                          task.id,
+                                          value ?? false,
+                                        ),
                                       ),
-                                      tileColor: Colors.transparent,
-                                      value: task.completed,
-                                      controlAffinity:
-                                          ListTileControlAffinity.leading,
                                       title: Text(
                                         task.title,
                                         style: TextStyle(
@@ -1030,12 +1051,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
                                         ),
                                       ),
                                       subtitle: _buildTaskSubtitle(task),
-                                      onChanged: (value) =>
-                                          widget.database.setTaskCompleted(
-                                        task.id,
-                                        value ?? false,
-                                      ),
-                                      secondary: IconButton(
+                                      trailing: IconButton(
                                         onPressed: () => widget.database
                                             .softDeleteTask(task.id),
                                         icon:
@@ -1044,6 +1060,17 @@ class _TodoHomePageState extends State<TodoHomePage> {
                                       ),
                                     ),
                                   ),
+                                );
+                                if (Platform.isAndroid) {
+                                  return ReorderableDelayedDragStartListener(
+                                    key: ValueKey(task.id),
+                                    index: index,
+                                    child: taskCard,
+                                  );
+                                }
+                                return KeyedSubtree(
+                                  key: ValueKey(task.id),
+                                  child: taskCard,
                                 );
                               },
                             ),

@@ -42,5 +42,5 @@ installer/output/
 
 - 当前安装包只支持 x64 Windows。
 - VC++ 运行库安装需要管理员权限。
-- 目前使用固定版本号 1.0.0，发布新版本时应同步修改构建脚本中的版本号。
+- 当前安装包版本为 1.1.0；发布新版本时应同步修改 `pubspec.yaml`、`installer/build-installer.ps1` 和 `installer/TodoList.iss` 中的版本号。
 - TodoList.iss 默认从 build/windows/x64/runner/Release 读取 Flutter 构建产物。

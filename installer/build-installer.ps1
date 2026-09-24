@@ -32,7 +32,7 @@ if ($null -eq $iscc) {
     throw '找不到 Inno Setup 7 的 ISCC.exe。请确认已安装 Inno Setup 7，并重新运行此脚本。'
 }
 
-& $iscc "/DMyAppVersion=1.0.0" $issFile
+& $iscc "/DMyAppVersion=1.1.0" $issFile
 if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup 构建失败，退出码：$LASTEXITCODE"
 }

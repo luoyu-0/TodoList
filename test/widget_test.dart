@@ -15,6 +15,7 @@ void main() {
     expect(find.text('0 个待办'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(milliseconds: 1));
     await database.close();
   });
 }
