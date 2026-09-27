@@ -8,6 +8,7 @@ class TaskLists extends Table {
   TextColumn get id => text()();
   TextColumn get name => text().withLength(min: 1, max: 120)();
   TextColumn get sortMode => text().withDefault(const Constant('createdAt'))();
+  BoolColumn get sortAscending => boolean().withDefault(const Constant(false))();
   BoolColumn get archived => boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
@@ -55,7 +56,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.test() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -67,19 +68,15 @@ class AppDatabase extends _$AppDatabase {
           if (from < 3) {
             await m.addColumn(taskLists, taskLists.sortMode);
           }
+          if (from < 4) {
+            await m.addColumn(taskLists, taskLists.sortAscending);
+          }
         },
       );
 
   Stream<List<Task>> watchInbox() {
     final query = select(tasks)
-      ..where((task) => task.deletedAt.isNull())
-      ..orderBy([
-        (task) => OrderingTerm(expression: task.completed),
-        (task) => OrderingTerm(
-              expression: task.createdAt,
-              mode: OrderingMode.desc,
-            ),
-      ]);
+      ..where((task) => task.deletedAt.isNull());
     return query.watch();
   }
 
@@ -103,6 +100,20 @@ class AppDatabase extends _$AppDatabase {
   Future<void> setSortMode(String sortMode) {
     return (update(taskLists)..where((item) => item.id.equals('inbox'))).write(
       TaskListsCompanion(sortMode: Value(sortMode)),
+    );
+  }
+
+  Future<bool> getSortAscending() async {
+    final list = await (select(taskLists)
+          ..where((item) => item.id.equals('inbox'))
+          ..limit(1))
+        .getSingleOrNull();
+    return list?.sortAscending ?? false;
+  }
+
+  Future<void> setSortAscending(bool ascending) {
+    return (update(taskLists)..where((item) => item.id.equals('inbox'))).write(
+      TaskListsCompanion(sortAscending: Value(ascending)),
     );
   }
 

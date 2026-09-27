@@ -168,6 +168,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
   bool _isMaximized = false;
   bool _showTrash = false;
   TaskSortMode _sortMode = TaskSortMode.createdAt;
+  bool _sortAscending = false;
   final _selectedTrashIds = <String>{};
   final _pinnedHiddenTaskIds = <String>{};
   final _manualTaskOrder = <String>[];
@@ -192,11 +193,17 @@ class _TodoHomePageState extends State<TodoHomePage> {
 
   Future<void> _loadSortMode() async {
     final value = await widget.database.getSortMode();
+    final ascending = await widget.database.getSortAscending();
     final mode = TaskSortMode.values.firstWhere(
       (item) => item.name == value,
       orElse: () => TaskSortMode.createdAt,
     );
-    if (mounted) setState(() => _sortMode = mode);
+    if (mounted) {
+      setState(() {
+        _sortMode = mode;
+        _sortAscending = ascending;
+      });
+    }
   }
 
   Future<void> _loadWindowState() async {
@@ -363,7 +370,10 @@ class _TodoHomePageState extends State<TodoHomePage> {
     return '${date.year}-$month-$day';
   }
 
-  List<Task> _sortTasks(Iterable<Task> source) {
+  List<Task> _sortTasks(
+    Iterable<Task> source, {
+    bool completedLast = false,
+  }) {
     final result = source.toList();
     if (_sortMode == TaskSortMode.manual) {
       if (_manualTaskOrder.isEmpty) {
@@ -379,28 +389,30 @@ class _TodoHomePageState extends State<TodoHomePage> {
       }
     }
     result.sort((a, b) {
-      if (a.completed != b.completed) {
+      if (completedLast && a.completed != b.completed) {
         return a.completed ? 1 : -1;
       }
+      final direction = _sortAscending ? 1 : -1;
       switch (_sortMode) {
         case TaskSortMode.title:
-          return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+          return direction *
+              a.title.toLowerCase().compareTo(b.title.toLowerCase());
         case TaskSortMode.dueAt:
           if (a.dueAt == null && b.dueAt == null) return 0;
           if (a.dueAt == null) return 1;
           if (b.dueAt == null) return -1;
-          return a.dueAt!.compareTo(b.dueAt!);
+          return direction * a.dueAt!.compareTo(b.dueAt!);
         case TaskSortMode.manual:
           final aIndex = _manualTaskOrder.indexOf(a.id);
           final bIndex = _manualTaskOrder.indexOf(b.id);
           if (aIndex != -1 && bIndex != -1) {
-            return aIndex.compareTo(bIndex);
+            return direction * aIndex.compareTo(bIndex);
           }
           if (aIndex != -1) return -1;
           if (bIndex != -1) return 1;
-          return a.sortOrder.compareTo(b.sortOrder);
+          return direction * a.sortOrder.compareTo(b.sortOrder);
         case TaskSortMode.createdAt:
-          return b.createdAt.compareTo(a.createdAt);
+          return direction * a.createdAt.compareTo(b.createdAt);
       }
     });
     return result;
@@ -419,17 +431,35 @@ class _TodoHomePageState extends State<TodoHomePage> {
     }
   }
 
+  Future<void> _toggleSortDirection() async {
+    final nextValue = !_sortAscending;
+    setState(() => _sortAscending = nextValue);
+    await widget.database.setSortAscending(nextValue);
+  }
+
   Future<void> _reorderTasks(List<Task> tasks, int oldIndex, int newIndex) async {
     final reordered = [...tasks];
     final task = reordered.removeAt(oldIndex);
     reordered.insert(newIndex, task);
+    final switchingToManual = _sortMode != TaskSortMode.manual;
+    // 拖动以当前屏幕顺序为准。首次切换到手动排序时使用正序，避免沿用
+    // 之前的降序设置导致列表在拖动结束后整体反转。
+    final ascending = switchingToManual ? true : _sortAscending;
+    final displayedOrder = reordered.map((item) => item.id).toList();
+    final persistedOrder = ascending
+        ? displayedOrder
+        : displayedOrder.reversed.toList();
     _manualTaskOrder
       ..clear()
-      ..addAll(reordered.map((item) => item.id));
+      ..addAll(persistedOrder);
     _manualOrderDirty = true;
-    if (_sortMode != TaskSortMode.manual) {
-      setState(() => _sortMode = TaskSortMode.manual);
+    if (switchingToManual) {
+      setState(() {
+        _sortMode = TaskSortMode.manual;
+        _sortAscending = ascending;
+      });
       await widget.database.setSortMode(TaskSortMode.manual.name);
+      await widget.database.setSortAscending(ascending);
     } else {
       setState(() {});
     }
@@ -686,6 +716,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
               final tasks = snapshot.data ?? const <Task>[];
             final visibleTasks = _sortTasks(
               tasks.where((task) => !_pinnedHiddenTaskIds.contains(task.id)),
+              completedLast: true,
             ).take(5).toList();
             return Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
@@ -926,6 +957,17 @@ class _TodoHomePageState extends State<TodoHomePage> {
                     Row(
                       children: [
                         Expanded(child: Text('$pending 个待办')),
+                        IconButton(
+                          onPressed: _toggleSortDirection,
+                          icon: Icon(
+                            _sortAscending
+                                ? FluentIcons.arrow_sort_up_24_regular
+                                : FluentIcons.arrow_sort_down_24_regular,
+                            size: 24,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                          tooltip: _sortAscending ? '升序' : '降序',
+                        ),
                         PopupMenuButton<TaskSortMode>(
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
