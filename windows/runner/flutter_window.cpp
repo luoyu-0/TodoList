@@ -2,7 +2,11 @@
 
 #include <optional>
 
+#include <flutter/encodable_value.h>
+#include <flutter/standard_method_codec.h>
+
 #include "flutter/generated_plugin_registrant.h"
+
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -25,6 +29,37 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  reminder_window_ = std::make_unique<ReminderWindow>(project_, [this]() {
+    reminder_channel_->InvokeMethod("open", nullptr);
+  });
+  reminder_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "com.todolist/reminder",
+          &flutter::StandardMethodCodec::GetInstance());
+  reminder_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() != "show" || !call.arguments()) {
+          result->NotImplemented();
+          return;
+        }
+        const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+        if (!args) {
+          result->Error("invalid_args", "缺少提醒任务");
+          return;
+        }
+        const auto it = args->find(flutter::EncodableValue("title"));
+        if (it == args->end()) {
+          result->Error("invalid_args", "缺少任务标题");
+          return;
+        }
+        const auto* title = std::get_if<std::string>(&it->second);
+        if (!title || !reminder_window_->Enqueue(*title)) {
+          result->Error("popup_failed", "提醒弹窗创建失败");
+          return;
+        }
+        result->Success();
+      });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -40,6 +75,8 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  reminder_window_.reset();
+  reminder_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

@@ -2,18 +2,26 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:tray_manager/tray_manager.dart' as tray;
 import 'package:window_manager/window_manager.dart';
 
 import 'data/local/app_database.dart';
+import 'services/notification_service.dart';
+import 'services/reminder_time.dart';
+import 'app_theme.dart';
+import 'reminder_popup.dart';
 
-enum TaskSortMode {
-  createdAt,
-  title,
-  dueAt,
-  manual,
+// 独立提醒引擎不初始化数据库、托盘或任务调度。
+@pragma('vm:entry-point')
+void reminderMain() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const ReminderPopupApp());
 }
+
+enum TaskSortMode { createdAt, title, dueAt, manual }
 
 bool _isPinnedWindow = false;
 Future<void> Function()? _beforeApplicationExit;
@@ -105,10 +113,15 @@ class _TodoListWindowListener extends WindowListener {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await TodoNotificationService.instance.initialize();
   if (Platform.isWindows) {
     await windowManager.ensureInitialized();
     final trayController = _TodoListTrayController();
     await trayController.initialize();
+    const MethodChannel('com.todolist/reminder')
+        .setMethodCallHandler((call) async {
+          if (call.method == 'open') await trayController._showWindow();
+        });
     windowManager.addListener(_TodoListWindowListener());
     await windowManager.setPreventClose(true);
     await windowManager.setTitleBarStyle(
@@ -142,11 +155,7 @@ class TodoListApp extends StatelessWidget {
     return MaterialApp(
       title: 'TodoList',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF4F46E5)),
-        useMaterial3: true,
-        scaffoldBackgroundColor: const Color(0xFFF8FAFC),
-      ),
+      theme: buildAppTheme(),
       home: TodoHomePage(database: database),
     );
   }
@@ -162,6 +171,10 @@ class TodoHomePage extends StatefulWidget {
 }
 
 class _TodoHomePageState extends State<TodoHomePage> {
+  static const _openTaskChannel = MethodChannel('com.todolist/open_task');
+  final _taskListScrollController = ScrollController();
+  final _targetTaskKey = GlobalKey();
+  String? _targetTaskId;
   final _titleController = TextEditingController();
   final _noteController = TextEditingController();
   bool _isPinned = false;
@@ -172,6 +185,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
   final _selectedTrashIds = <String>{};
   final _pinnedHiddenTaskIds = <String>{};
   final _manualTaskOrder = <String>[];
+  StreamSubscription<List<Task>>? _taskSubscription;
   bool _manualOrderDirty = false;
   Offset? _lastPinnedPosition;
   Size? _lastPinnedSize;
@@ -182,7 +196,25 @@ class _TodoHomePageState extends State<TodoHomePage> {
   @override
   void initState() {
     super.initState();
+    if (Platform.isAndroid) {
+      _openTaskChannel.setMethodCallHandler((call) async {
+        if (call.method == 'openTask' && call.arguments is String) {
+          await _openTaskFromNotification(call.arguments as String);
+        }
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        final taskId = await _openTaskChannel.invokeMethod<String>(
+          'takePendingTaskId',
+        );
+        if (taskId != null) await _openTaskFromNotification(taskId);
+      });
+    }
     _beforeApplicationExit = _prepareForApplicationExit;
+    _taskSubscription = widget.database.watchInbox().listen(
+      (tasks) => unawaited(
+        TodoNotificationService.instance.syncTasks(tasks, widget.database),
+      ),
+    );
     _loadWindowState();
     _loadSortMode();
     _trashCleanupTimer = Timer.periodic(
@@ -215,21 +247,75 @@ class _TodoHomePageState extends State<TodoHomePage> {
 
   @override
   void dispose() {
+    if (Platform.isAndroid) _openTaskChannel.setMethodCallHandler(null);
+    _taskListScrollController.dispose();
     _beforeApplicationExit = null;
+    _taskSubscription?.cancel();
     _titleController.dispose();
     _noteController.dispose();
     _trashCleanupTimer?.cancel();
     super.dispose();
   }
 
+  Future<void> _openTaskFromNotification(String taskId) async {
+    final tasks = await widget.database.watchInbox().first;
+    if (!mounted) return;
+    final ordered = _sortTasks(tasks);
+    final index = ordered.indexWhere((task) => task.id == taskId);
+    if (index < 0) return;
+    setState(() {
+      _showTrash = false;
+      _targetTaskId = taskId;
+    });
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !_taskListScrollController.hasClients) return;
+    final position = _taskListScrollController.position;
+    final offset = position.maxScrollExtent * index / ordered.length;
+    _taskListScrollController.jumpTo(offset.clamp(0, position.maxScrollExtent));
+    await WidgetsBinding.instance.endOfFrame;
+    final target = _targetTaskKey.currentContext;
+    if (target != null && target.mounted) {
+      await Scrollable.ensureVisible(
+        target,
+        alignment: 0.25,
+        duration: const Duration(milliseconds: 250),
+      );
+    } else if (mounted) {
+      // 高度差异很大的列表中仍直接打开准确的任务详情。
+      await _showTaskEditor(task: ordered[index]);
+    }
+  }
+
   Future<void> _showTaskEditor({Task? task}) async {
     _titleController.text = task?.title ?? '';
     _noteController.text = task?.note ?? '';
+    bool saving = false;
+    String? editorError;
     DateTime? selectedDueAt = task?.dueAt;
+    bool dueHasTime = task?.dueHasTime ?? false;
+    bool reminderEnabled = task?.reminderEnabled ?? true;
+    bool reminderEdited = task?.reminderAt != null;
+    DateTime? selectedReminderAt =
+        task?.reminderAt ??
+        (selectedDueAt == null
+            ? null
+            : defaultReminderAt(selectedDueAt, dueHasTime));
+    final additionalReminders = task == null
+        ? <DateTime>[]
+        : (await widget.database.getAdditionalReminders([task.id]))
+              .map((item) => item.remindAt)
+              .toList();
+    if (!mounted) return;
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
+          ),
+          contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
           ),
@@ -242,7 +328,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
                 children: [
                   TextField(
                     controller: _titleController,
-                    autofocus: true,
+                    autofocus: false,
                     maxLength: 200,
                     decoration: InputDecoration(
                       labelText: '标题',
@@ -268,78 +354,480 @@ class _TodoHomePageState extends State<TodoHomePage> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          selectedDueAt == null
-                              ? '截止日期：未设置'
-                              : '截止日期：${_formatDate(selectedDueAt!)}',
-                        ),
+                  Card(
+                    elevation: 0,
+                    margin: EdgeInsets.zero,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant,
                       ),
-                      TextButton.icon(
-                        onPressed: () async {
-                          final date = await showDatePicker(
-                            context: context,
-                            firstDate: DateTime.now(),
-                            lastDate: DateTime(2100),
-                            initialDate: selectedDueAt != null &&
-                                    selectedDueAt!.isBefore(DateTime.now())
-                                ? DateTime.now()
-                                : selectedDueAt ?? DateTime.now(),
-                          );
-                          if (date != null) {
-                            setDialogState(() => selectedDueAt = date);
-                          }
-                        },
-                        icon: const Icon(Icons.calendar_today_outlined),
-                        label: const Text('选择日期'),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: ExpansionTile(
+                      shape: const Border(),
+                      collapsedShape: const Border(),
+                      title: const Text('截止日期'),
+                      subtitle: Text(
+                        selectedDueAt == null
+                            ? '未设置'
+                            : dueHasTime
+                            ? _formatDateTime(selectedDueAt!)
+                            : '${_formatDate(selectedDueAt!)} · 全天',
                       ),
-                      if (selectedDueAt != null)
-                        IconButton(
-                          onPressed: () =>
-                              setDialogState(() => selectedDueAt = null),
-                          icon: const Icon(Icons.clear),
-                          tooltip: '清除日期',
+                      childrenPadding: const EdgeInsets.only(bottom: 8),
+                      children: [
+                        Wrap(
+                          alignment: WrapAlignment.start,
+                          spacing: 4,
+                          children: [
+                            TextButton.icon(
+                              onPressed: () async {
+                                FocusScope.of(context).unfocus();
+                                final date = await showDatePicker(
+                                  context: context,
+                                  firstDate: DateTime.now(),
+                                  lastDate: DateTime(2100),
+                                  initialDate:
+                                      selectedDueAt != null &&
+                                          selectedDueAt!.isBefore(
+                                            DateTime.now(),
+                                          )
+                                      ? DateTime.now()
+                                      : selectedDueAt ?? DateTime.now(),
+                                );
+                                if (date != null && dialogContext.mounted) {
+                                  final current = selectedDueAt ?? date;
+                                  setDialogState(() {
+                                    selectedDueAt = DateTime(
+                                      date.year,
+                                      date.month,
+                                      date.day,
+                                      dueHasTime ? current.hour : 0,
+                                      dueHasTime ? current.minute : 0,
+                                    );
+                                    if (!reminderEdited) {
+                                      selectedReminderAt = defaultReminderAt(
+                                        selectedDueAt!,
+                                        dueHasTime,
+                                      );
+                                    }
+                                  });
+                                }
+                              },
+                              icon: const Icon(Icons.calendar_today_outlined),
+                              label: const Text('选择日期'),
+                            ),
+                            if (selectedDueAt != null)
+                              TextButton.icon(
+                                onPressed: () async {
+                                  FocusScope.of(context).unfocus();
+                                  final time = await _pickWheelDateTime(
+                                    selectedDueAt!,
+                                    CupertinoDatePickerMode.time,
+                                  );
+                                  if (time != null && dialogContext.mounted) {
+                                    setDialogState(() {
+                                      dueHasTime = true;
+                                      selectedDueAt = DateTime(
+                                        selectedDueAt!.year,
+                                        selectedDueAt!.month,
+                                        selectedDueAt!.day,
+                                        time.hour,
+                                        time.minute,
+                                      );
+                                      if (!reminderEdited) {
+                                        selectedReminderAt = selectedDueAt;
+                                      }
+                                    });
+                                  }
+                                },
+                                icon: const Icon(Icons.access_time_outlined),
+                                label: const Text('选择时间'),
+                              ),
+                            if (selectedDueAt != null && dueHasTime)
+                              TextButton(
+                                onPressed: () => setDialogState(() {
+                                  dueHasTime = false;
+                                  selectedDueAt = DateTime(
+                                    selectedDueAt!.year,
+                                    selectedDueAt!.month,
+                                    selectedDueAt!.day,
+                                  );
+                                  if (!reminderEdited) {
+                                    selectedReminderAt = defaultReminderAt(
+                                      selectedDueAt!,
+                                      false,
+                                    );
+                                  }
+                                }),
+                                child: const Text('设为全天'),
+                              ),
+                            if (selectedDueAt != null)
+                              IconButton(
+                                onPressed: () => setDialogState(() {
+                                  selectedDueAt = null;
+                                  dueHasTime = false;
+                                  selectedReminderAt = null;
+                                  reminderEdited = false;
+                                  additionalReminders.clear();
+                                }),
+                                icon: const Icon(Icons.clear),
+                                tooltip: '清除日期',
+                              ),
+                          ],
                         ),
-                    ],
+                      ],
+                    ),
                   ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SwitchListTile.adaptive(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('提醒'),
+                          subtitle: Text(
+                            selectedDueAt == null
+                                ? '设置截止日期后可开启提醒'
+                                : reminderEnabled
+                                ? '到时间通知我'
+                                : '已关闭，提醒时间已保留',
+                          ),
+                          value: selectedDueAt != null && reminderEnabled,
+                          onChanged: selectedDueAt == null
+                              ? null
+                              : (enabled) => setDialogState(
+                                  () => reminderEnabled = enabled,
+                                ),
+                        ),
+                        if (selectedDueAt != null && reminderEnabled) ...[
+                          Card(
+                            elevation: 0,
+                            margin: const EdgeInsets.only(bottom: 8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: ListTile(
+                              title: const Text('提醒 1'),
+                              subtitle: Text(
+                                _formatDateTime(
+                                  selectedReminderAt ??
+                                      defaultReminderAt(
+                                        selectedDueAt!,
+                                        dueHasTime,
+                                      ),
+                                ),
+                              ),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () async {
+                                FocusScope.of(context).unfocus();
+                                final picked = await _pickWheelDateTime(
+                                  selectedReminderAt ??
+                                      defaultReminderAt(
+                                        selectedDueAt!,
+                                        dueHasTime,
+                                      ),
+                                  CupertinoDatePickerMode.dateAndTime,
+                                );
+                                if (picked != null && dialogContext.mounted) {
+                                  setDialogState(() {
+                                    selectedReminderAt = picked;
+                                    reminderEdited = true;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                          for (
+                            var index = 0;
+                            index < additionalReminders.length;
+                            index++
+                          )
+                            Card(
+                              elevation: 0,
+                              margin: const EdgeInsets.only(bottom: 8),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: ListTile(
+                                title: Text('提醒 ${index + 2}'),
+                                subtitle: Text(
+                                  _formatDateTime(additionalReminders[index]),
+                                ),
+                                onTap: () async {
+                                  final picked = await _pickWheelDateTime(
+                                    additionalReminders[index],
+                                    CupertinoDatePickerMode.dateAndTime,
+                                  );
+                                  if (picked != null && dialogContext.mounted) {
+                                    setDialogState(() {
+                                      additionalReminders[index] = picked;
+                                      additionalReminders.sort();
+                                    });
+                                  }
+                                },
+                                trailing: IconButton(
+                                  tooltip: '删除提醒',
+                                  icon: const Icon(Icons.close_rounded),
+                                  onPressed: () => setDialogState(
+                                    () => additionalReminders.removeAt(index),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                              onPressed: () async {
+                                final picked = await _pickWheelDateTime(
+                                  defaultReminderAt(
+                                    selectedDueAt!,
+                                    dueHasTime,
+                                  ).add(const Duration(hours: 1)),
+                                  CupertinoDatePickerMode.dateAndTime,
+                                );
+                                if (picked != null && dialogContext.mounted) {
+                                  setDialogState(() {
+                                    if (!additionalReminders.contains(picked) &&
+                                        picked !=
+                                            (selectedReminderAt ??
+                                                defaultReminderAt(
+                                                  selectedDueAt!,
+                                                  dueHasTime,
+                                                ))) {
+                                      additionalReminders.add(picked);
+                                    }
+                                    additionalReminders.sort();
+                                  });
+                                }
+                              },
+                              icon: const Icon(Icons.add_alarm_outlined),
+                              label: const Text('新增提醒时间'),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (editorError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        editorError!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
+              onPressed: saving ? null : () => Navigator.pop(dialogContext),
               child: const Text('取消'),
             ),
             FilledButton(
               onPressed: () async {
                 final title = _titleController.text.trim();
-                if (title.isEmpty) return;
-                final note = _noteController.text.trim();
-                if (task == null) {
-                  await widget.database.addTask(
-                    title: title,
-                    note: note.isEmpty ? null : note,
-                    dueAt: selectedDueAt,
-                  );
-                } else {
-                  await widget.database.updateTask(
-                    id: task.id,
-                    title: title,
-                    note: note.isEmpty ? null : note,
-                    dueAt: selectedDueAt,
-                  );
+                if (saving) return;
+                if (title.isEmpty) {
+                  setDialogState(() => editorError = '请输入任务标题');
+                  return;
                 }
-                if (dialogContext.mounted) Navigator.pop(dialogContext);
+                setDialogState(() {
+                  saving = true;
+                  editorError = null;
+                });
+                try {
+                  final note = _noteController.text.trim();
+                  if (task == null) {
+                    await widget.database.addTask(
+                      title: title,
+                      note: note.isEmpty ? null : note,
+                      dueAt: selectedDueAt,
+                      dueHasTime: dueHasTime,
+                      reminderAt: selectedReminderAt,
+                      reminderEnabled: reminderEnabled,
+                      additionalReminders: additionalReminders,
+                    );
+                  } else {
+                    await widget.database.updateTask(
+                      id: task.id,
+                      title: title,
+                      note: note.isEmpty ? null : note,
+                      dueAt: selectedDueAt,
+                      dueHasTime: dueHasTime,
+                      reminderAt: selectedReminderAt,
+                      reminderEnabled: reminderEnabled,
+                      additionalReminders: additionalReminders,
+                    );
+                  }
+                  if (dialogContext.mounted) Navigator.pop(dialogContext);
+                } catch (_) {
+                  if (dialogContext.mounted) {
+                    setDialogState(() => editorError = '保存失败，请重试');
+                  }
+                } finally {
+                  if (dialogContext.mounted) {
+                    setDialogState(() => saving = false);
+                  }
+                }
               },
-              child: Text(task == null ? '添加' : '保存'),
+              child: Text(saving ? '保存中…' : '保存'),
             ),
           ],
         ),
       ),
     );
+  }
+
+  Future<DateTime?> _pickWheelDateTime(
+    DateTime initial,
+    CupertinoDatePickerMode mode,
+  ) async {
+    var selected = initial;
+    final timeController = TextEditingController(
+      text:
+          '${initial.hour.toString().padLeft(2, '0')}:${initial.minute.toString().padLeft(2, '0')}',
+    );
+    final timeFocus = FocusNode();
+    var invalidTime = false;
+    final result = await showModalBottomSheet<DateTime>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: SizedBox(
+              height: MediaQuery.viewInsetsOf(context).bottom > 0
+                  ? (mode == CupertinoDatePickerMode.dateAndTime ? 205 : 155)
+                  : (mode == CupertinoDatePickerMode.dateAndTime ? 390 : 340),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        const Expanded(child: Text('滚动选择，或输入 24 小时时间')),
+                        TextButton(
+                          onPressed: () {
+                            final value = with24HourTime(
+                              selected,
+                              timeController.text,
+                            );
+                            if (value == null) {
+                              setSheetState(() => invalidTime = true);
+                              return;
+                            }
+                            Navigator.pop(sheetContext, value);
+                          },
+                          child: const Text('确定'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (mode == CupertinoDatePickerMode.dateAndTime)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: TextButton.icon(
+                          icon: const Icon(Icons.calendar_month_outlined),
+                          label: Text('日期：${_formatDate(selected)}'),
+                          onPressed: () async {
+                            timeFocus.unfocus();
+                            final date = await showDatePicker(
+                              context: context,
+                              initialDate: selected,
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime(2100),
+                            );
+                            if (date != null) {
+                              setSheetState(() {
+                                selected = DateTime(
+                                  date.year,
+                                  date.month,
+                                  date.day,
+                                  selected.hour,
+                                  selected.minute,
+                                );
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: TextField(
+                      controller: timeController,
+                      focusNode: timeFocus,
+                      keyboardType: TextInputType.datetime,
+                      maxLength: 5,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9:]')),
+                      ],
+                      onChanged: (_) {
+                        if (invalidTime) {
+                          setSheetState(() => invalidTime = false);
+                        }
+                      },
+                      decoration: InputDecoration(
+                        labelText: '时间（HH:mm）',
+                        hintText: '例如 18:30',
+                        errorText: invalidTime ? '请输入 00:00–23:59' : null,
+                        border: const OutlineInputBorder(),
+                        counterText: '',
+                      ),
+                    ),
+                  ),
+                  if (MediaQuery.viewInsetsOf(context).bottom == 0)
+                    Expanded(
+                      child: CupertinoDatePicker(
+                        mode: CupertinoDatePickerMode.time,
+                        initialDateTime: initial,
+                        use24hFormat: true,
+                        onDateTimeChanged: (value) {
+                          selected = DateTime(
+                            selected.year,
+                            selected.month,
+                            selected.day,
+                            value.hour,
+                            value.minute,
+                          );
+                          if (!timeFocus.hasFocus) {
+                            timeController.text =
+                                '${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
+                          }
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    timeController.dispose();
+    timeFocus.dispose();
+    return result;
   }
 
   Future<void> _showTaskMenu(Task task, Offset position) async {
@@ -351,6 +839,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
         MediaQuery.of(context).size.width - position.dx,
         MediaQuery.of(context).size.height - position.dy,
       ),
+      menuPadding: EdgeInsets.zero,
       items: const [
         PopupMenuItem(value: 'edit', child: Text('查看详情 / 编辑')),
         PopupMenuItem(value: 'delete', child: Text('移入回收站')),
@@ -370,10 +859,13 @@ class _TodoHomePageState extends State<TodoHomePage> {
     return '${date.year}-$month-$day';
   }
 
-  List<Task> _sortTasks(
-    Iterable<Task> source, {
-    bool completedLast = false,
-  }) {
+  String _formatDateTime(DateTime date) {
+    final hour = date.hour.toString().padLeft(2, '0');
+    final minute = date.minute.toString().padLeft(2, '0');
+    return '${_formatDate(date)} $hour:$minute';
+  }
+
+  List<Task> _sortTasks(Iterable<Task> source, {bool completedLast = false}) {
     final result = source.toList();
     if (_sortMode == TaskSortMode.manual) {
       if (_manualTaskOrder.isEmpty) {
@@ -437,7 +929,11 @@ class _TodoHomePageState extends State<TodoHomePage> {
     await widget.database.setSortAscending(nextValue);
   }
 
-  Future<void> _reorderTasks(List<Task> tasks, int oldIndex, int newIndex) async {
+  Future<void> _reorderTasks(
+    List<Task> tasks,
+    int oldIndex,
+    int newIndex,
+  ) async {
     final reordered = [...tasks];
     final task = reordered.removeAt(oldIndex);
     reordered.insert(newIndex, task);
@@ -489,14 +985,10 @@ class _TodoHomePageState extends State<TodoHomePage> {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (hasNote)
-          Text(
-            task.note!.trim(),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
+          Text(task.note!.trim(), maxLines: 2, overflow: TextOverflow.ellipsis),
         if (hasDueDate)
           Text(
-            '截止：${_formatDate(task.dueAt!)}',
+            '截止：${task.dueHasTime ? _formatDateTime(task.dueAt!) : _formatDate(task.dueAt!)}',
             maxLines: 1,
             softWrap: false,
             overflow: TextOverflow.visible,
@@ -591,13 +1083,9 @@ class _TodoHomePageState extends State<TodoHomePage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Text('永久删除任务？'),
-        content: Text(
-          '将永久删除 ${taskIds.length} 个任务，删除后无法恢复。',
-        ),
+        content: Text('将永久删除 ${taskIds.length} 个任务，删除后无法恢复。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -714,88 +1202,83 @@ class _TodoHomePageState extends State<TodoHomePage> {
             stream: widget.database.watchInbox(),
             builder: (context, snapshot) {
               final tasks = snapshot.data ?? const <Task>[];
-            final visibleTasks = _sortTasks(
-              tasks.where((task) => !_pinnedHiddenTaskIds.contains(task.id)),
-              completedLast: true,
-            ).take(5).toList();
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'TodoList',
-                          style: TextStyle(fontWeight: FontWeight.w700),
+              final visibleTasks = _sortTasks(
+                tasks.where((task) => !_pinnedHiddenTaskIds.contains(task.id)),
+                completedLast: true,
+              ).take(5).toList();
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'TodoList',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        onPressed: _minimizeWindow,
-                        icon: const Icon(Icons.remove),
-                        tooltip: '最小化',
-                      ),
-                      IconButton(
-                        onPressed: _toggleAlwaysOnTop,
-                        icon: Icon(
-                          _isAlwaysOnTop
-                              ? FluentIcons.pin_off_24_regular
-                              : FluentIcons.pin_24_regular,
+                        IconButton(
+                          onPressed: _minimizeWindow,
+                          icon: const Icon(Icons.remove),
+                          tooltip: '最小化',
                         ),
-                        tooltip: _isAlwaysOnTop ? '取消始终置顶' : '始终置顶',
-                      ),
-                      IconButton(
-                        onPressed: _togglePinned,
-                        icon: const Icon(
-                          Icons.push_pin,
+                        IconButton(
+                          onPressed: _toggleAlwaysOnTop,
+                          icon: Icon(
+                            _isAlwaysOnTop
+                                ? FluentIcons.pin_off_24_regular
+                                : FluentIcons.pin_24_regular,
+                          ),
+                          tooltip: _isAlwaysOnTop ? '取消始终置顶' : '始终置顶',
                         ),
-                        tooltip: '返回正常窗口',
-                      ),
-                    ],
-                  ),
-                  if (visibleTasks.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 8),
-                      child: Text('暂无待办'),
-                    )
-                  else
-                    Flexible(
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        itemCount: visibleTasks.length,
-                        separatorBuilder: (_, _) => const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final task = visibleTasks[index];
-                          return CheckboxListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            value: task.completed,
-                            controlAffinity: ListTileControlAffinity.leading,
-                            title: Text(
-                              task.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            onChanged: (value) =>
-                                widget.database.setTaskCompleted(
-                              task.id,
-                              value ?? false,
-                            ),
-                            secondary: IconButton(
-                              onPressed: () => setState(
-                                () => _pinnedHiddenTaskIds.add(task.id),
-                              ),
-                              icon: const Icon(Icons.visibility_off_outlined),
-                              tooltip: '仅从本次悬浮中隐藏',
-                            ),
-                          );
-                        },
-                      ),
+                        IconButton(
+                          onPressed: _togglePinned,
+                          icon: const Icon(Icons.push_pin),
+                          tooltip: '返回正常窗口',
+                        ),
+                      ],
                     ),
-                ],
-              ),
-            );
+                    if (visibleTasks.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 8),
+                        child: Text('暂无待办'),
+                      )
+                    else
+                      Flexible(
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: visibleTasks.length,
+                          separatorBuilder: (_, _) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final task = visibleTasks[index];
+                            return CheckboxListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              value: task.completed,
+                              controlAffinity: ListTileControlAffinity.leading,
+                              title: Text(
+                                task.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              onChanged: (value) => widget.database
+                                  .setTaskCompleted(task.id, value ?? false),
+                              secondary: IconButton(
+                                onPressed: () => setState(
+                                  () => _pinnedHiddenTaskIds.add(task.id),
+                                ),
+                                icon: const Icon(Icons.visibility_off_outlined),
+                                tooltip: '仅从本次悬浮中隐藏',
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              );
             },
           ),
         ),
@@ -857,8 +1340,9 @@ class _TodoHomePageState extends State<TodoHomePage> {
                                   const SizedBox(height: 8),
                               itemBuilder: (context, index) {
                                 final task = tasks[index];
-                                final selected =
-                                    _selectedTrashIds.contains(task.id);
+                                final selected = _selectedTrashIds.contains(
+                                  task.id,
+                                );
                                 return Card(
                                   elevation: 0,
                                   margin: EdgeInsets.zero,
@@ -891,11 +1375,15 @@ class _TodoHomePageState extends State<TodoHomePage> {
                                       children: [
                                         IconButton(
                                           onPressed: () async {
-                                            await widget.database
-                                                .restoreTask(task.id);
+                                            await widget.database.restoreTask(
+                                              task.id,
+                                            );
                                             if (mounted) {
-                                              setState(() => _selectedTrashIds
-                                                  .remove(task.id));
+                                              setState(
+                                                () => _selectedTrashIds.remove(
+                                                  task.id,
+                                                ),
+                                              );
                                             }
                                           },
                                           icon: const Icon(Icons.restore),
@@ -903,8 +1391,12 @@ class _TodoHomePageState extends State<TodoHomePage> {
                                         ),
                                         IconButton(
                                           onPressed: () =>
-                                              _confirmPermanentDelete([task.id]),
-                                          icon: const Icon(Icons.delete_forever),
+                                              _confirmPermanentDelete([
+                                                task.id,
+                                              ]),
+                                          icon: const Icon(
+                                            Icons.delete_forever,
+                                          ),
                                           tooltip: '永久删除',
                                         ),
                                       ],
@@ -931,9 +1423,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
         onPressed: () => _showTaskEditor(),
         icon: const Icon(Icons.add),
         label: const Text('新增任务'),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
       body: Center(
         child: ConstrainedBox(
@@ -951,7 +1441,10 @@ class _TodoHomePageState extends State<TodoHomePage> {
                   children: [
                     const Text(
                       '收件箱',
-                      style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -964,7 +1457,9 @@ class _TodoHomePageState extends State<TodoHomePage> {
                                 ? FluentIcons.arrow_sort_up_24_regular
                                 : FluentIcons.arrow_sort_down_24_regular,
                             size: 24,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
                           ),
                           tooltip: _sortAscending ? '升序' : '降序',
                         ),
@@ -1047,21 +1542,28 @@ class _TodoHomePageState extends State<TodoHomePage> {
                       child: orderedTasks.isEmpty
                           ? const Center(child: Text('暂无待办，点击右下角新增任务'))
                           : ReorderableListView.builder(
+                              scrollController: _taskListScrollController,
                               buildDefaultDragHandles: Platform.isWindows,
-                              proxyDecorator: (child, index, animation) => child,
+                              proxyDecorator: (child, index, animation) =>
+                                  child,
                               itemCount: orderedTasks.length,
                               onReorderItem: (oldIndex, newIndex) =>
                                   _reorderTasks(
-                                orderedTasks,
-                                oldIndex,
-                                newIndex,
-                              ),
+                                    orderedTasks,
+                                    oldIndex,
+                                    newIndex,
+                                  ),
                               itemBuilder: (context, index) {
                                 final task = orderedTasks[index];
                                 final taskCard = Card(
+                                  key: _targetTaskId == task.id
+                                      ? _targetTaskKey
+                                      : null,
                                   elevation: 0,
                                   margin: EdgeInsets.zero,
-                                  color: const Color(0xFFF7F1FC),
+                                  color: _targetTaskId == task.id
+                                      ? Theme.of(context).colorScheme.primaryContainer
+                                      : const Color(0xFFF7F1FC),
                                   clipBehavior: Clip.antiAlias,
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(16),
@@ -1069,9 +1571,9 @@ class _TodoHomePageState extends State<TodoHomePage> {
                                   child: GestureDetector(
                                     onSecondaryTapDown: (details) =>
                                         _showTaskMenu(
-                                      task,
-                                      details.globalPosition,
-                                    ),
+                                          task,
+                                          details.globalPosition,
+                                        ),
                                     child: ListTile(
                                       onTap: Platform.isAndroid
                                           ? () => _showTaskEditor(task: task)
@@ -1080,9 +1582,9 @@ class _TodoHomePageState extends State<TodoHomePage> {
                                         value: task.completed,
                                         onChanged: (value) =>
                                             widget.database.setTaskCompleted(
-                                          task.id,
-                                          value ?? false,
-                                        ),
+                                              task.id,
+                                              value ?? false,
+                                            ),
                                       ),
                                       title: Text(
                                         task.title,
@@ -1096,8 +1598,7 @@ class _TodoHomePageState extends State<TodoHomePage> {
                                       trailing: IconButton(
                                         onPressed: () => widget.database
                                             .softDeleteTask(task.id),
-                                        icon:
-                                            const Icon(Icons.delete_outline),
+                                        icon: const Icon(Icons.delete_outline),
                                         tooltip: '移入回收站',
                                       ),
                                     ),

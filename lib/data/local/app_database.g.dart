@@ -574,6 +574,47 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
     type: DriftSqlType.dateTime,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _dueHasTimeMeta = const VerificationMeta(
+    'dueHasTime',
+  );
+  @override
+  late final GeneratedColumn<bool> dueHasTime = GeneratedColumn<bool>(
+    'due_has_time',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("due_has_time" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _reminderAtMeta = const VerificationMeta(
+    'reminderAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> reminderAt = GeneratedColumn<DateTime>(
+    'reminder_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _reminderEnabledMeta = const VerificationMeta(
+    'reminderEnabled',
+  );
+  @override
+  late final GeneratedColumn<bool> reminderEnabled = GeneratedColumn<bool>(
+    'reminder_enabled',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("reminder_enabled" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -620,6 +661,9 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
     priority,
     sortOrder,
     dueAt,
+    dueHasTime,
+    reminderAt,
+    reminderEnabled,
     createdAt,
     updatedAt,
     deletedAt,
@@ -696,6 +740,30 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
         dueAt.isAcceptableOrUnknown(data['due_at']!, _dueAtMeta),
       );
     }
+    if (data.containsKey('due_has_time')) {
+      context.handle(
+        _dueHasTimeMeta,
+        dueHasTime.isAcceptableOrUnknown(
+          data['due_has_time']!,
+          _dueHasTimeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('reminder_at')) {
+      context.handle(
+        _reminderAtMeta,
+        reminderAt.isAcceptableOrUnknown(data['reminder_at']!, _reminderAtMeta),
+      );
+    }
+    if (data.containsKey('reminder_enabled')) {
+      context.handle(
+        _reminderEnabledMeta,
+        reminderEnabled.isAcceptableOrUnknown(
+          data['reminder_enabled']!,
+          _reminderEnabledMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -759,6 +827,18 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}due_at'],
       ),
+      dueHasTime: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}due_has_time'],
+      )!,
+      reminderAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}reminder_at'],
+      ),
+      reminderEnabled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}reminder_enabled'],
+      )!,
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -790,6 +870,9 @@ class Task extends DataClass implements Insertable<Task> {
   final int priority;
   final int sortOrder;
   final DateTime? dueAt;
+  final bool dueHasTime;
+  final DateTime? reminderAt;
+  final bool reminderEnabled;
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? deletedAt;
@@ -803,6 +886,9 @@ class Task extends DataClass implements Insertable<Task> {
     required this.priority,
     required this.sortOrder,
     this.dueAt,
+    required this.dueHasTime,
+    this.reminderAt,
+    required this.reminderEnabled,
     required this.createdAt,
     required this.updatedAt,
     this.deletedAt,
@@ -825,6 +911,11 @@ class Task extends DataClass implements Insertable<Task> {
     if (!nullToAbsent || dueAt != null) {
       map['due_at'] = Variable<DateTime>(dueAt);
     }
+    map['due_has_time'] = Variable<bool>(dueHasTime);
+    if (!nullToAbsent || reminderAt != null) {
+      map['reminder_at'] = Variable<DateTime>(reminderAt);
+    }
+    map['reminder_enabled'] = Variable<bool>(reminderEnabled);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     if (!nullToAbsent || deletedAt != null) {
@@ -848,6 +939,11 @@ class Task extends DataClass implements Insertable<Task> {
       dueAt: dueAt == null && nullToAbsent
           ? const Value.absent()
           : Value(dueAt),
+      dueHasTime: Value(dueHasTime),
+      reminderAt: reminderAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(reminderAt),
+      reminderEnabled: Value(reminderEnabled),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
       deletedAt: deletedAt == null && nullToAbsent
@@ -871,6 +967,9 @@ class Task extends DataClass implements Insertable<Task> {
       priority: serializer.fromJson<int>(json['priority']),
       sortOrder: serializer.fromJson<int>(json['sortOrder']),
       dueAt: serializer.fromJson<DateTime?>(json['dueAt']),
+      dueHasTime: serializer.fromJson<bool>(json['dueHasTime']),
+      reminderAt: serializer.fromJson<DateTime?>(json['reminderAt']),
+      reminderEnabled: serializer.fromJson<bool>(json['reminderEnabled']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
       deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
@@ -889,6 +988,9 @@ class Task extends DataClass implements Insertable<Task> {
       'priority': serializer.toJson<int>(priority),
       'sortOrder': serializer.toJson<int>(sortOrder),
       'dueAt': serializer.toJson<DateTime?>(dueAt),
+      'dueHasTime': serializer.toJson<bool>(dueHasTime),
+      'reminderAt': serializer.toJson<DateTime?>(reminderAt),
+      'reminderEnabled': serializer.toJson<bool>(reminderEnabled),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
       'deletedAt': serializer.toJson<DateTime?>(deletedAt),
@@ -905,6 +1007,9 @@ class Task extends DataClass implements Insertable<Task> {
     int? priority,
     int? sortOrder,
     Value<DateTime?> dueAt = const Value.absent(),
+    bool? dueHasTime,
+    Value<DateTime?> reminderAt = const Value.absent(),
+    bool? reminderEnabled,
     DateTime? createdAt,
     DateTime? updatedAt,
     Value<DateTime?> deletedAt = const Value.absent(),
@@ -918,6 +1023,9 @@ class Task extends DataClass implements Insertable<Task> {
     priority: priority ?? this.priority,
     sortOrder: sortOrder ?? this.sortOrder,
     dueAt: dueAt.present ? dueAt.value : this.dueAt,
+    dueHasTime: dueHasTime ?? this.dueHasTime,
+    reminderAt: reminderAt.present ? reminderAt.value : this.reminderAt,
+    reminderEnabled: reminderEnabled ?? this.reminderEnabled,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
     deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
@@ -935,6 +1043,15 @@ class Task extends DataClass implements Insertable<Task> {
       priority: data.priority.present ? data.priority.value : this.priority,
       sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
       dueAt: data.dueAt.present ? data.dueAt.value : this.dueAt,
+      dueHasTime: data.dueHasTime.present
+          ? data.dueHasTime.value
+          : this.dueHasTime,
+      reminderAt: data.reminderAt.present
+          ? data.reminderAt.value
+          : this.reminderAt,
+      reminderEnabled: data.reminderEnabled.present
+          ? data.reminderEnabled.value
+          : this.reminderEnabled,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
@@ -953,6 +1070,9 @@ class Task extends DataClass implements Insertable<Task> {
           ..write('priority: $priority, ')
           ..write('sortOrder: $sortOrder, ')
           ..write('dueAt: $dueAt, ')
+          ..write('dueHasTime: $dueHasTime, ')
+          ..write('reminderAt: $reminderAt, ')
+          ..write('reminderEnabled: $reminderEnabled, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('deletedAt: $deletedAt')
@@ -971,6 +1091,9 @@ class Task extends DataClass implements Insertable<Task> {
     priority,
     sortOrder,
     dueAt,
+    dueHasTime,
+    reminderAt,
+    reminderEnabled,
     createdAt,
     updatedAt,
     deletedAt,
@@ -988,6 +1111,9 @@ class Task extends DataClass implements Insertable<Task> {
           other.priority == this.priority &&
           other.sortOrder == this.sortOrder &&
           other.dueAt == this.dueAt &&
+          other.dueHasTime == this.dueHasTime &&
+          other.reminderAt == this.reminderAt &&
+          other.reminderEnabled == this.reminderEnabled &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
           other.deletedAt == this.deletedAt);
@@ -1003,6 +1129,9 @@ class TasksCompanion extends UpdateCompanion<Task> {
   final Value<int> priority;
   final Value<int> sortOrder;
   final Value<DateTime?> dueAt;
+  final Value<bool> dueHasTime;
+  final Value<DateTime?> reminderAt;
+  final Value<bool> reminderEnabled;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<DateTime?> deletedAt;
@@ -1017,6 +1146,9 @@ class TasksCompanion extends UpdateCompanion<Task> {
     this.priority = const Value.absent(),
     this.sortOrder = const Value.absent(),
     this.dueAt = const Value.absent(),
+    this.dueHasTime = const Value.absent(),
+    this.reminderAt = const Value.absent(),
+    this.reminderEnabled = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.deletedAt = const Value.absent(),
@@ -1032,6 +1164,9 @@ class TasksCompanion extends UpdateCompanion<Task> {
     this.priority = const Value.absent(),
     this.sortOrder = const Value.absent(),
     this.dueAt = const Value.absent(),
+    this.dueHasTime = const Value.absent(),
+    this.reminderAt = const Value.absent(),
+    this.reminderEnabled = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.deletedAt = const Value.absent(),
@@ -1049,6 +1184,9 @@ class TasksCompanion extends UpdateCompanion<Task> {
     Expression<int>? priority,
     Expression<int>? sortOrder,
     Expression<DateTime>? dueAt,
+    Expression<bool>? dueHasTime,
+    Expression<DateTime>? reminderAt,
+    Expression<bool>? reminderEnabled,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<DateTime>? deletedAt,
@@ -1064,6 +1202,9 @@ class TasksCompanion extends UpdateCompanion<Task> {
       if (priority != null) 'priority': priority,
       if (sortOrder != null) 'sort_order': sortOrder,
       if (dueAt != null) 'due_at': dueAt,
+      if (dueHasTime != null) 'due_has_time': dueHasTime,
+      if (reminderAt != null) 'reminder_at': reminderAt,
+      if (reminderEnabled != null) 'reminder_enabled': reminderEnabled,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (deletedAt != null) 'deleted_at': deletedAt,
@@ -1081,6 +1222,9 @@ class TasksCompanion extends UpdateCompanion<Task> {
     Value<int>? priority,
     Value<int>? sortOrder,
     Value<DateTime?>? dueAt,
+    Value<bool>? dueHasTime,
+    Value<DateTime?>? reminderAt,
+    Value<bool>? reminderEnabled,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
     Value<DateTime?>? deletedAt,
@@ -1096,6 +1240,9 @@ class TasksCompanion extends UpdateCompanion<Task> {
       priority: priority ?? this.priority,
       sortOrder: sortOrder ?? this.sortOrder,
       dueAt: dueAt ?? this.dueAt,
+      dueHasTime: dueHasTime ?? this.dueHasTime,
+      reminderAt: reminderAt ?? this.reminderAt,
+      reminderEnabled: reminderEnabled ?? this.reminderEnabled,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: deletedAt ?? this.deletedAt,
@@ -1133,6 +1280,15 @@ class TasksCompanion extends UpdateCompanion<Task> {
     if (dueAt.present) {
       map['due_at'] = Variable<DateTime>(dueAt.value);
     }
+    if (dueHasTime.present) {
+      map['due_has_time'] = Variable<bool>(dueHasTime.value);
+    }
+    if (reminderAt.present) {
+      map['reminder_at'] = Variable<DateTime>(reminderAt.value);
+    }
+    if (reminderEnabled.present) {
+      map['reminder_enabled'] = Variable<bool>(reminderEnabled.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -1160,6 +1316,9 @@ class TasksCompanion extends UpdateCompanion<Task> {
           ..write('priority: $priority, ')
           ..write('sortOrder: $sortOrder, ')
           ..write('dueAt: $dueAt, ')
+          ..write('dueHasTime: $dueHasTime, ')
+          ..write('reminderAt: $reminderAt, ')
+          ..write('reminderEnabled: $reminderEnabled, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('deletedAt: $deletedAt, ')
@@ -1737,6 +1896,265 @@ class TaskAttachmentsCompanion extends UpdateCompanion<TaskAttachment> {
   }
 }
 
+class $TaskRemindersTable extends TaskReminders
+    with TableInfo<$TaskRemindersTable, TaskReminder> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $TaskRemindersTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _taskIdMeta = const VerificationMeta('taskId');
+  @override
+  late final GeneratedColumn<String> taskId = GeneratedColumn<String>(
+    'task_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _remindAtMeta = const VerificationMeta(
+    'remindAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> remindAt = GeneratedColumn<DateTime>(
+    'remind_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, taskId, remindAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'task_reminders';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<TaskReminder> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('task_id')) {
+      context.handle(
+        _taskIdMeta,
+        taskId.isAcceptableOrUnknown(data['task_id']!, _taskIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_taskIdMeta);
+    }
+    if (data.containsKey('remind_at')) {
+      context.handle(
+        _remindAtMeta,
+        remindAt.isAcceptableOrUnknown(data['remind_at']!, _remindAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_remindAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  TaskReminder map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return TaskReminder(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      taskId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}task_id'],
+      )!,
+      remindAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}remind_at'],
+      )!,
+    );
+  }
+
+  @override
+  $TaskRemindersTable createAlias(String alias) {
+    return $TaskRemindersTable(attachedDatabase, alias);
+  }
+}
+
+class TaskReminder extends DataClass implements Insertable<TaskReminder> {
+  final String id;
+  final String taskId;
+  final DateTime remindAt;
+  const TaskReminder({
+    required this.id,
+    required this.taskId,
+    required this.remindAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['task_id'] = Variable<String>(taskId);
+    map['remind_at'] = Variable<DateTime>(remindAt);
+    return map;
+  }
+
+  TaskRemindersCompanion toCompanion(bool nullToAbsent) {
+    return TaskRemindersCompanion(
+      id: Value(id),
+      taskId: Value(taskId),
+      remindAt: Value(remindAt),
+    );
+  }
+
+  factory TaskReminder.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return TaskReminder(
+      id: serializer.fromJson<String>(json['id']),
+      taskId: serializer.fromJson<String>(json['taskId']),
+      remindAt: serializer.fromJson<DateTime>(json['remindAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'taskId': serializer.toJson<String>(taskId),
+      'remindAt': serializer.toJson<DateTime>(remindAt),
+    };
+  }
+
+  TaskReminder copyWith({String? id, String? taskId, DateTime? remindAt}) =>
+      TaskReminder(
+        id: id ?? this.id,
+        taskId: taskId ?? this.taskId,
+        remindAt: remindAt ?? this.remindAt,
+      );
+  TaskReminder copyWithCompanion(TaskRemindersCompanion data) {
+    return TaskReminder(
+      id: data.id.present ? data.id.value : this.id,
+      taskId: data.taskId.present ? data.taskId.value : this.taskId,
+      remindAt: data.remindAt.present ? data.remindAt.value : this.remindAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TaskReminder(')
+          ..write('id: $id, ')
+          ..write('taskId: $taskId, ')
+          ..write('remindAt: $remindAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, taskId, remindAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is TaskReminder &&
+          other.id == this.id &&
+          other.taskId == this.taskId &&
+          other.remindAt == this.remindAt);
+}
+
+class TaskRemindersCompanion extends UpdateCompanion<TaskReminder> {
+  final Value<String> id;
+  final Value<String> taskId;
+  final Value<DateTime> remindAt;
+  final Value<int> rowid;
+  const TaskRemindersCompanion({
+    this.id = const Value.absent(),
+    this.taskId = const Value.absent(),
+    this.remindAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  TaskRemindersCompanion.insert({
+    required String id,
+    required String taskId,
+    required DateTime remindAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       taskId = Value(taskId),
+       remindAt = Value(remindAt);
+  static Insertable<TaskReminder> custom({
+    Expression<String>? id,
+    Expression<String>? taskId,
+    Expression<DateTime>? remindAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (taskId != null) 'task_id': taskId,
+      if (remindAt != null) 'remind_at': remindAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  TaskRemindersCompanion copyWith({
+    Value<String>? id,
+    Value<String>? taskId,
+    Value<DateTime>? remindAt,
+    Value<int>? rowid,
+  }) {
+    return TaskRemindersCompanion(
+      id: id ?? this.id,
+      taskId: taskId ?? this.taskId,
+      remindAt: remindAt ?? this.remindAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (taskId.present) {
+      map['task_id'] = Variable<String>(taskId.value);
+    }
+    if (remindAt.present) {
+      map['remind_at'] = Variable<DateTime>(remindAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TaskRemindersCompanion(')
+          ..write('id: $id, ')
+          ..write('taskId: $taskId, ')
+          ..write('remindAt: $remindAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -1745,6 +2163,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $TaskAttachmentsTable taskAttachments = $TaskAttachmentsTable(
     this,
   );
+  late final $TaskRemindersTable taskReminders = $TaskRemindersTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1753,6 +2172,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     taskLists,
     tasks,
     taskAttachments,
+    taskReminders,
   ];
 }
 
@@ -2001,6 +2421,9 @@ typedef $$TasksTableCreateCompanionBuilder =
       Value<int> priority,
       Value<int> sortOrder,
       Value<DateTime?> dueAt,
+      Value<bool> dueHasTime,
+      Value<DateTime?> reminderAt,
+      Value<bool> reminderEnabled,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
       Value<DateTime?> deletedAt,
@@ -2017,6 +2440,9 @@ typedef $$TasksTableUpdateCompanionBuilder =
       Value<int> priority,
       Value<int> sortOrder,
       Value<DateTime?> dueAt,
+      Value<bool> dueHasTime,
+      Value<DateTime?> reminderAt,
+      Value<bool> reminderEnabled,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
       Value<DateTime?> deletedAt,
@@ -2073,6 +2499,21 @@ class $$TasksTableFilterComposer extends Composer<_$AppDatabase, $TasksTable> {
 
   ColumnFilters<DateTime> get dueAt => $composableBuilder(
     column: $table.dueAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get dueHasTime => $composableBuilder(
+    column: $table.dueHasTime,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get reminderAt => $composableBuilder(
+    column: $table.reminderAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get reminderEnabled => $composableBuilder(
+    column: $table.reminderEnabled,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2146,6 +2587,21 @@ class $$TasksTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get dueHasTime => $composableBuilder(
+    column: $table.dueHasTime,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get reminderAt => $composableBuilder(
+    column: $table.reminderAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get reminderEnabled => $composableBuilder(
+    column: $table.reminderEnabled,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -2200,6 +2656,21 @@ class $$TasksTableAnnotationComposer
   GeneratedColumn<DateTime> get dueAt =>
       $composableBuilder(column: $table.dueAt, builder: (column) => column);
 
+  GeneratedColumn<bool> get dueHasTime => $composableBuilder(
+    column: $table.dueHasTime,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get reminderAt => $composableBuilder(
+    column: $table.reminderAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get reminderEnabled => $composableBuilder(
+    column: $table.reminderEnabled,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
@@ -2247,6 +2718,9 @@ class $$TasksTableTableManager
                 Value<int> priority = const Value.absent(),
                 Value<int> sortOrder = const Value.absent(),
                 Value<DateTime?> dueAt = const Value.absent(),
+                Value<bool> dueHasTime = const Value.absent(),
+                Value<DateTime?> reminderAt = const Value.absent(),
+                Value<bool> reminderEnabled = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<DateTime?> deletedAt = const Value.absent(),
@@ -2261,6 +2735,9 @@ class $$TasksTableTableManager
                 priority: priority,
                 sortOrder: sortOrder,
                 dueAt: dueAt,
+                dueHasTime: dueHasTime,
+                reminderAt: reminderAt,
+                reminderEnabled: reminderEnabled,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 deletedAt: deletedAt,
@@ -2277,6 +2754,9 @@ class $$TasksTableTableManager
                 Value<int> priority = const Value.absent(),
                 Value<int> sortOrder = const Value.absent(),
                 Value<DateTime?> dueAt = const Value.absent(),
+                Value<bool> dueHasTime = const Value.absent(),
+                Value<DateTime?> reminderAt = const Value.absent(),
+                Value<bool> reminderEnabled = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<DateTime?> deletedAt = const Value.absent(),
@@ -2291,6 +2771,9 @@ class $$TasksTableTableManager
                 priority: priority,
                 sortOrder: sortOrder,
                 dueAt: dueAt,
+                dueHasTime: dueHasTime,
+                reminderAt: reminderAt,
+                reminderEnabled: reminderEnabled,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 deletedAt: deletedAt,
@@ -2602,6 +3085,168 @@ typedef $$TaskAttachmentsTableProcessedTableManager =
       TaskAttachment,
       PrefetchHooks Function()
     >;
+typedef $$TaskRemindersTableCreateCompanionBuilder =
+    TaskRemindersCompanion Function({
+      required String id,
+      required String taskId,
+      required DateTime remindAt,
+      Value<int> rowid,
+    });
+typedef $$TaskRemindersTableUpdateCompanionBuilder =
+    TaskRemindersCompanion Function({
+      Value<String> id,
+      Value<String> taskId,
+      Value<DateTime> remindAt,
+      Value<int> rowid,
+    });
+
+class $$TaskRemindersTableFilterComposer
+    extends Composer<_$AppDatabase, $TaskRemindersTable> {
+  $$TaskRemindersTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get taskId => $composableBuilder(
+    column: $table.taskId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get remindAt => $composableBuilder(
+    column: $table.remindAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$TaskRemindersTableOrderingComposer
+    extends Composer<_$AppDatabase, $TaskRemindersTable> {
+  $$TaskRemindersTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get taskId => $composableBuilder(
+    column: $table.taskId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get remindAt => $composableBuilder(
+    column: $table.remindAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$TaskRemindersTableAnnotationComposer
+    extends Composer<_$AppDatabase, $TaskRemindersTable> {
+  $$TaskRemindersTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get taskId =>
+      $composableBuilder(column: $table.taskId, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get remindAt =>
+      $composableBuilder(column: $table.remindAt, builder: (column) => column);
+}
+
+class $$TaskRemindersTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $TaskRemindersTable,
+          TaskReminder,
+          $$TaskRemindersTableFilterComposer,
+          $$TaskRemindersTableOrderingComposer,
+          $$TaskRemindersTableAnnotationComposer,
+          $$TaskRemindersTableCreateCompanionBuilder,
+          $$TaskRemindersTableUpdateCompanionBuilder,
+          (
+            TaskReminder,
+            BaseReferences<_$AppDatabase, $TaskRemindersTable, TaskReminder>,
+          ),
+          TaskReminder,
+          PrefetchHooks Function()
+        > {
+  $$TaskRemindersTableTableManager(_$AppDatabase db, $TaskRemindersTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$TaskRemindersTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$TaskRemindersTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$TaskRemindersTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> taskId = const Value.absent(),
+                Value<DateTime> remindAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => TaskRemindersCompanion(
+                id: id,
+                taskId: taskId,
+                remindAt: remindAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String taskId,
+                required DateTime remindAt,
+                Value<int> rowid = const Value.absent(),
+              }) => TaskRemindersCompanion.insert(
+                id: id,
+                taskId: taskId,
+                remindAt: remindAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$TaskRemindersTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $TaskRemindersTable,
+      TaskReminder,
+      $$TaskRemindersTableFilterComposer,
+      $$TaskRemindersTableOrderingComposer,
+      $$TaskRemindersTableAnnotationComposer,
+      $$TaskRemindersTableCreateCompanionBuilder,
+      $$TaskRemindersTableUpdateCompanionBuilder,
+      (
+        TaskReminder,
+        BaseReferences<_$AppDatabase, $TaskRemindersTable, TaskReminder>,
+      ),
+      TaskReminder,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -2612,4 +3257,6 @@ class $AppDatabaseManager {
       $$TasksTableTableManager(_db, _db.tasks);
   $$TaskAttachmentsTableTableManager get taskAttachments =>
       $$TaskAttachmentsTableTableManager(_db, _db.taskAttachments);
+  $$TaskRemindersTableTableManager get taskReminders =>
+      $$TaskRemindersTableTableManager(_db, _db.taskReminders);
 }
