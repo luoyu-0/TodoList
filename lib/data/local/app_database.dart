@@ -10,6 +10,10 @@ class TaskLists extends Table {
   TextColumn get sortMode => text().withDefault(const Constant('createdAt'))();
   BoolColumn get sortAscending =>
       boolean().withDefault(const Constant(false))();
+  BoolColumn get expandSubtasks =>
+      boolean().withDefault(const Constant(false))();
+  BoolColumn get showSubtasksInPin =>
+      boolean().withDefault(const Constant(false))();
   BoolColumn get archived => boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
@@ -70,7 +74,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.test() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -97,6 +101,10 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 7) {
         await m.addColumn(tasks, tasks.reminderEnabled);
+      }
+      if (from < 8) {
+        await m.addColumn(taskLists, taskLists.expandSubtasks);
+        await m.addColumn(taskLists, taskLists.showSubtasksInPin);
       }
     },
   );
@@ -144,6 +152,35 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  Future<({bool expandSubtasks, bool showSubtasksInPin})>
+  getDisplaySettings() async {
+    final list =
+        await (select(taskLists)
+              ..where((item) => item.id.equals('inbox'))
+              ..limit(1))
+            .getSingleOrNull();
+    return (
+      expandSubtasks: list?.expandSubtasks ?? false,
+      showSubtasksInPin: list?.showSubtasksInPin ?? false,
+    );
+  }
+
+  Future<void> setDisplaySettings({
+    bool? expandSubtasks,
+    bool? showSubtasksInPin,
+  }) {
+    return (update(taskLists)..where((item) => item.id.equals('inbox'))).write(
+      TaskListsCompanion(
+        expandSubtasks: expandSubtasks == null
+            ? const Value.absent()
+            : Value(expandSubtasks),
+        showSubtasksInPin: showSubtasksInPin == null
+            ? const Value.absent()
+            : Value(showSubtasksInPin),
+      ),
+    );
+  }
+
   Future<void> addTask({
     required String title,
     String? note,
@@ -155,6 +192,11 @@ class AppDatabase extends _$AppDatabase {
     bool reminderEnabled = true,
     List<DateTime> additionalReminders = const [],
   }) async {
+    if (parentTaskId != null) {
+      if (await getTaskDepth(parentTaskId) >= 3) {
+        throw StateError('最多支持三层任务');
+      }
+    }
     final lastTask =
         await (select(tasks)
               ..where((task) => task.deletedAt.isNull())
@@ -187,13 +229,36 @@ class AppDatabase extends _$AppDatabase {
     });
   }
 
-  Future<void> setTaskCompleted(String id, bool completed) {
-    return (update(tasks)..where((task) => task.id.equals(id))).write(
-      TasksCompanion(
-        completed: Value(completed),
-        updatedAt: Value(DateTime.now()),
-      ),
-    );
+  Future<int> getTaskDepth(String taskId) async {
+    var depth = 0;
+    String? currentId = taskId;
+    final visited = <String>{};
+    while (currentId != null) {
+      final id = currentId;
+      if (!visited.add(id)) throw StateError('任务层级存在循环');
+      final current =
+          await (select(tasks)
+                ..where((task) => task.id.equals(id) & task.deletedAt.isNull())
+                ..limit(1))
+              .getSingleOrNull();
+      if (current == null) throw StateError('父任务不存在或已删除');
+      depth++;
+      currentId = current.parentTaskId;
+    }
+    return depth;
+  }
+
+  Future<void> setTaskCompleted(String id, bool completed) async {
+    await transaction(() async {
+      final affected = await _taskAndDescendantIds(id);
+      if (affected.isEmpty) return;
+      await (update(tasks)..where((task) => task.id.isIn(affected))).write(
+        TasksCompanion(
+          completed: Value(completed),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
+    });
   }
 
   Future<void> updateTask({
@@ -260,13 +325,15 @@ class AppDatabase extends _$AppDatabase {
     });
   }
 
-  Future<void> softDeleteTask(String id) {
-    return (update(tasks)..where((task) => task.id.equals(id))).write(
-      TasksCompanion(
-        deletedAt: Value(DateTime.now()),
-        updatedAt: Value(DateTime.now()),
-      ),
-    );
+  Future<void> softDeleteTask(String id) async {
+    await transaction(() async {
+      final affected = await _taskAndDescendantIds(id);
+      if (affected.isEmpty) return;
+      final now = DateTime.now();
+      await (update(tasks)..where((task) => task.id.isIn(affected))).write(
+        TasksCompanion(deletedAt: Value(now), updatedAt: Value(now)),
+      );
+    });
   }
 
   Stream<List<Task>> watchTrash() {
@@ -279,13 +346,25 @@ class AppDatabase extends _$AppDatabase {
     return query.watch();
   }
 
-  Future<void> restoreTask(String id) {
-    return (update(tasks)..where((task) => task.id.equals(id))).write(
-      TasksCompanion(
-        deletedAt: const Value(null),
-        updatedAt: Value(DateTime.now()),
-      ),
-    );
+  Future<void> restoreTask(String id) async {
+    await transaction(() async {
+      final all = await select(tasks).get();
+      final byId = {for (final task in all) task.id: task};
+      final affected = _collectTaskIds(id, all);
+      var parentId = byId[id]?.parentTaskId;
+      while (parentId != null &&
+          byId.containsKey(parentId) &&
+          affected.add(parentId)) {
+        parentId = byId[parentId]?.parentTaskId;
+      }
+      if (affected.isEmpty) return;
+      await (update(tasks)..where((task) => task.id.isIn(affected))).write(
+        TasksCompanion(
+          deletedAt: const Value(null),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
+    });
   }
 
   Future<void> permanentlyDeleteTask(String id) {
@@ -309,16 +388,41 @@ class AppDatabase extends _$AppDatabase {
     final taskIds = ids.toList();
     if (taskIds.isEmpty) return;
     await transaction(() async {
+      final all = await select(tasks).get();
+      final affected = <String>{};
       for (final id in taskIds) {
-        await (delete(
-          taskReminders,
-        )..where((reminder) => reminder.taskId.equals(id))).go();
-        await (delete(
-          taskAttachments,
-        )..where((attachment) => attachment.taskId.equals(id))).go();
-        await (delete(tasks)..where((task) => task.id.equals(id))).go();
+        affected.addAll(_collectTaskIds(id, all));
       }
+      if (affected.isEmpty) return;
+      await (delete(
+        taskReminders,
+      )..where((reminder) => reminder.taskId.isIn(affected))).go();
+      await (delete(
+        taskAttachments,
+      )..where((attachment) => attachment.taskId.isIn(affected))).go();
+      await (delete(tasks)..where((task) => task.id.isIn(affected))).go();
     });
+  }
+
+  Future<Set<String>> _taskAndDescendantIds(String id) async {
+    return _collectTaskIds(id, await select(tasks).get());
+  }
+
+  Set<String> _collectTaskIds(String id, List<Task> all) {
+    if (!all.any((task) => task.id == id)) return {};
+    final children = <String, List<String>>{};
+    for (final task in all) {
+      if (task.parentTaskId != null) {
+        children.putIfAbsent(task.parentTaskId!, () => []).add(task.id);
+      }
+    }
+    final result = <String>{};
+    final pending = <String>[id];
+    while (pending.isNotEmpty) {
+      final next = pending.removeLast();
+      if (result.add(next)) pending.addAll(children[next] ?? const []);
+    }
+    return result;
   }
 }
 

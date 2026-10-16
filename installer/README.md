@@ -22,7 +22,7 @@
 3. 构建 Windows Release。
 4. 调用 Inno Setup 生成安装包。
 
-1.1.4 的输出文件为 `installer/output/TodoList-Setup-1.1.4.exe`。
+1.2.0 的输出文件为 `installer/output/TodoList-Setup-1.2.0.exe`。
 
 输出目录：
 
@@ -44,5 +44,5 @@ installer/output/
 
 - 当前安装包只支持 x64 Windows。
 - VC++ 运行库安装需要管理员权限。
-- 当前安装包版本为 1.1.4；发布新版本时应同步修改 `pubspec.yaml`、`installer/build-installer.ps1` 和 `installer/TodoList.iss` 中的版本号。
+- 当前安装包版本为 1.2.0；发布新版本时应同步修改 `pubspec.yaml`、`installer/build-installer.ps1` 和 `installer/TodoList.iss` 中的版本号。
 - TodoList.iss 默认从 build/windows/x64/runner/Release 读取 Flutter 构建产物。

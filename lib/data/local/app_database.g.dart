@@ -58,6 +58,36 @@ class $TaskListsTable extends TaskLists
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _expandSubtasksMeta = const VerificationMeta(
+    'expandSubtasks',
+  );
+  @override
+  late final GeneratedColumn<bool> expandSubtasks = GeneratedColumn<bool>(
+    'expand_subtasks',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("expand_subtasks" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _showSubtasksInPinMeta = const VerificationMeta(
+    'showSubtasksInPin',
+  );
+  @override
+  late final GeneratedColumn<bool> showSubtasksInPin = GeneratedColumn<bool>(
+    'show_subtasks_in_pin',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("show_subtasks_in_pin" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   static const VerificationMeta _archivedMeta = const VerificationMeta(
     'archived',
   );
@@ -103,6 +133,8 @@ class $TaskListsTable extends TaskLists
     name,
     sortMode,
     sortAscending,
+    expandSubtasks,
+    showSubtasksInPin,
     archived,
     createdAt,
     updatedAt,
@@ -144,6 +176,24 @@ class $TaskListsTable extends TaskLists
         sortAscending.isAcceptableOrUnknown(
           data['sort_ascending']!,
           _sortAscendingMeta,
+        ),
+      );
+    }
+    if (data.containsKey('expand_subtasks')) {
+      context.handle(
+        _expandSubtasksMeta,
+        expandSubtasks.isAcceptableOrUnknown(
+          data['expand_subtasks']!,
+          _expandSubtasksMeta,
+        ),
+      );
+    }
+    if (data.containsKey('show_subtasks_in_pin')) {
+      context.handle(
+        _showSubtasksInPinMeta,
+        showSubtasksInPin.isAcceptableOrUnknown(
+          data['show_subtasks_in_pin']!,
+          _showSubtasksInPinMeta,
         ),
       );
     }
@@ -190,6 +240,14 @@ class $TaskListsTable extends TaskLists
         DriftSqlType.bool,
         data['${effectivePrefix}sort_ascending'],
       )!,
+      expandSubtasks: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}expand_subtasks'],
+      )!,
+      showSubtasksInPin: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}show_subtasks_in_pin'],
+      )!,
       archived: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}archived'],
@@ -216,6 +274,8 @@ class TaskList extends DataClass implements Insertable<TaskList> {
   final String name;
   final String sortMode;
   final bool sortAscending;
+  final bool expandSubtasks;
+  final bool showSubtasksInPin;
   final bool archived;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -224,6 +284,8 @@ class TaskList extends DataClass implements Insertable<TaskList> {
     required this.name,
     required this.sortMode,
     required this.sortAscending,
+    required this.expandSubtasks,
+    required this.showSubtasksInPin,
     required this.archived,
     required this.createdAt,
     required this.updatedAt,
@@ -235,6 +297,8 @@ class TaskList extends DataClass implements Insertable<TaskList> {
     map['name'] = Variable<String>(name);
     map['sort_mode'] = Variable<String>(sortMode);
     map['sort_ascending'] = Variable<bool>(sortAscending);
+    map['expand_subtasks'] = Variable<bool>(expandSubtasks);
+    map['show_subtasks_in_pin'] = Variable<bool>(showSubtasksInPin);
     map['archived'] = Variable<bool>(archived);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
@@ -247,6 +311,8 @@ class TaskList extends DataClass implements Insertable<TaskList> {
       name: Value(name),
       sortMode: Value(sortMode),
       sortAscending: Value(sortAscending),
+      expandSubtasks: Value(expandSubtasks),
+      showSubtasksInPin: Value(showSubtasksInPin),
       archived: Value(archived),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
@@ -263,6 +329,8 @@ class TaskList extends DataClass implements Insertable<TaskList> {
       name: serializer.fromJson<String>(json['name']),
       sortMode: serializer.fromJson<String>(json['sortMode']),
       sortAscending: serializer.fromJson<bool>(json['sortAscending']),
+      expandSubtasks: serializer.fromJson<bool>(json['expandSubtasks']),
+      showSubtasksInPin: serializer.fromJson<bool>(json['showSubtasksInPin']),
       archived: serializer.fromJson<bool>(json['archived']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
@@ -276,6 +344,8 @@ class TaskList extends DataClass implements Insertable<TaskList> {
       'name': serializer.toJson<String>(name),
       'sortMode': serializer.toJson<String>(sortMode),
       'sortAscending': serializer.toJson<bool>(sortAscending),
+      'expandSubtasks': serializer.toJson<bool>(expandSubtasks),
+      'showSubtasksInPin': serializer.toJson<bool>(showSubtasksInPin),
       'archived': serializer.toJson<bool>(archived),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
@@ -287,6 +357,8 @@ class TaskList extends DataClass implements Insertable<TaskList> {
     String? name,
     String? sortMode,
     bool? sortAscending,
+    bool? expandSubtasks,
+    bool? showSubtasksInPin,
     bool? archived,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -295,6 +367,8 @@ class TaskList extends DataClass implements Insertable<TaskList> {
     name: name ?? this.name,
     sortMode: sortMode ?? this.sortMode,
     sortAscending: sortAscending ?? this.sortAscending,
+    expandSubtasks: expandSubtasks ?? this.expandSubtasks,
+    showSubtasksInPin: showSubtasksInPin ?? this.showSubtasksInPin,
     archived: archived ?? this.archived,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -307,6 +381,12 @@ class TaskList extends DataClass implements Insertable<TaskList> {
       sortAscending: data.sortAscending.present
           ? data.sortAscending.value
           : this.sortAscending,
+      expandSubtasks: data.expandSubtasks.present
+          ? data.expandSubtasks.value
+          : this.expandSubtasks,
+      showSubtasksInPin: data.showSubtasksInPin.present
+          ? data.showSubtasksInPin.value
+          : this.showSubtasksInPin,
       archived: data.archived.present ? data.archived.value : this.archived,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
@@ -320,6 +400,8 @@ class TaskList extends DataClass implements Insertable<TaskList> {
           ..write('name: $name, ')
           ..write('sortMode: $sortMode, ')
           ..write('sortAscending: $sortAscending, ')
+          ..write('expandSubtasks: $expandSubtasks, ')
+          ..write('showSubtasksInPin: $showSubtasksInPin, ')
           ..write('archived: $archived, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -333,6 +415,8 @@ class TaskList extends DataClass implements Insertable<TaskList> {
     name,
     sortMode,
     sortAscending,
+    expandSubtasks,
+    showSubtasksInPin,
     archived,
     createdAt,
     updatedAt,
@@ -345,6 +429,8 @@ class TaskList extends DataClass implements Insertable<TaskList> {
           other.name == this.name &&
           other.sortMode == this.sortMode &&
           other.sortAscending == this.sortAscending &&
+          other.expandSubtasks == this.expandSubtasks &&
+          other.showSubtasksInPin == this.showSubtasksInPin &&
           other.archived == this.archived &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
@@ -355,6 +441,8 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
   final Value<String> name;
   final Value<String> sortMode;
   final Value<bool> sortAscending;
+  final Value<bool> expandSubtasks;
+  final Value<bool> showSubtasksInPin;
   final Value<bool> archived;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
@@ -364,6 +452,8 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
     this.name = const Value.absent(),
     this.sortMode = const Value.absent(),
     this.sortAscending = const Value.absent(),
+    this.expandSubtasks = const Value.absent(),
+    this.showSubtasksInPin = const Value.absent(),
     this.archived = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -374,6 +464,8 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
     required String name,
     this.sortMode = const Value.absent(),
     this.sortAscending = const Value.absent(),
+    this.expandSubtasks = const Value.absent(),
+    this.showSubtasksInPin = const Value.absent(),
     this.archived = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -385,6 +477,8 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
     Expression<String>? name,
     Expression<String>? sortMode,
     Expression<bool>? sortAscending,
+    Expression<bool>? expandSubtasks,
+    Expression<bool>? showSubtasksInPin,
     Expression<bool>? archived,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
@@ -395,6 +489,8 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
       if (name != null) 'name': name,
       if (sortMode != null) 'sort_mode': sortMode,
       if (sortAscending != null) 'sort_ascending': sortAscending,
+      if (expandSubtasks != null) 'expand_subtasks': expandSubtasks,
+      if (showSubtasksInPin != null) 'show_subtasks_in_pin': showSubtasksInPin,
       if (archived != null) 'archived': archived,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -407,6 +503,8 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
     Value<String>? name,
     Value<String>? sortMode,
     Value<bool>? sortAscending,
+    Value<bool>? expandSubtasks,
+    Value<bool>? showSubtasksInPin,
     Value<bool>? archived,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
@@ -417,6 +515,8 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
       name: name ?? this.name,
       sortMode: sortMode ?? this.sortMode,
       sortAscending: sortAscending ?? this.sortAscending,
+      expandSubtasks: expandSubtasks ?? this.expandSubtasks,
+      showSubtasksInPin: showSubtasksInPin ?? this.showSubtasksInPin,
       archived: archived ?? this.archived,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -438,6 +538,12 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
     }
     if (sortAscending.present) {
       map['sort_ascending'] = Variable<bool>(sortAscending.value);
+    }
+    if (expandSubtasks.present) {
+      map['expand_subtasks'] = Variable<bool>(expandSubtasks.value);
+    }
+    if (showSubtasksInPin.present) {
+      map['show_subtasks_in_pin'] = Variable<bool>(showSubtasksInPin.value);
     }
     if (archived.present) {
       map['archived'] = Variable<bool>(archived.value);
@@ -461,6 +567,8 @@ class TaskListsCompanion extends UpdateCompanion<TaskList> {
           ..write('name: $name, ')
           ..write('sortMode: $sortMode, ')
           ..write('sortAscending: $sortAscending, ')
+          ..write('expandSubtasks: $expandSubtasks, ')
+          ..write('showSubtasksInPin: $showSubtasksInPin, ')
           ..write('archived: $archived, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
@@ -2182,6 +2290,8 @@ typedef $$TaskListsTableCreateCompanionBuilder =
       required String name,
       Value<String> sortMode,
       Value<bool> sortAscending,
+      Value<bool> expandSubtasks,
+      Value<bool> showSubtasksInPin,
       Value<bool> archived,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -2193,6 +2303,8 @@ typedef $$TaskListsTableUpdateCompanionBuilder =
       Value<String> name,
       Value<String> sortMode,
       Value<bool> sortAscending,
+      Value<bool> expandSubtasks,
+      Value<bool> showSubtasksInPin,
       Value<bool> archived,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -2225,6 +2337,16 @@ class $$TaskListsTableFilterComposer
 
   ColumnFilters<bool> get sortAscending => $composableBuilder(
     column: $table.sortAscending,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get expandSubtasks => $composableBuilder(
+    column: $table.expandSubtasks,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get showSubtasksInPin => $composableBuilder(
+    column: $table.showSubtasksInPin,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2273,6 +2395,16 @@ class $$TaskListsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get expandSubtasks => $composableBuilder(
+    column: $table.expandSubtasks,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get showSubtasksInPin => $composableBuilder(
+    column: $table.showSubtasksInPin,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<bool> get archived => $composableBuilder(
     column: $table.archived,
     builder: (column) => ColumnOrderings(column),
@@ -2309,6 +2441,16 @@ class $$TaskListsTableAnnotationComposer
 
   GeneratedColumn<bool> get sortAscending => $composableBuilder(
     column: $table.sortAscending,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get expandSubtasks => $composableBuilder(
+    column: $table.expandSubtasks,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get showSubtasksInPin => $composableBuilder(
+    column: $table.showSubtasksInPin,
     builder: (column) => column,
   );
 
@@ -2354,6 +2496,8 @@ class $$TaskListsTableTableManager
                 Value<String> name = const Value.absent(),
                 Value<String> sortMode = const Value.absent(),
                 Value<bool> sortAscending = const Value.absent(),
+                Value<bool> expandSubtasks = const Value.absent(),
+                Value<bool> showSubtasksInPin = const Value.absent(),
                 Value<bool> archived = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -2363,6 +2507,8 @@ class $$TaskListsTableTableManager
                 name: name,
                 sortMode: sortMode,
                 sortAscending: sortAscending,
+                expandSubtasks: expandSubtasks,
+                showSubtasksInPin: showSubtasksInPin,
                 archived: archived,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -2374,6 +2520,8 @@ class $$TaskListsTableTableManager
                 required String name,
                 Value<String> sortMode = const Value.absent(),
                 Value<bool> sortAscending = const Value.absent(),
+                Value<bool> expandSubtasks = const Value.absent(),
+                Value<bool> showSubtasksInPin = const Value.absent(),
                 Value<bool> archived = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -2383,6 +2531,8 @@ class $$TaskListsTableTableManager
                 name: name,
                 sortMode: sortMode,
                 sortAscending: sortAscending,
+                expandSubtasks: expandSubtasks,
+                showSubtasksInPin: showSubtasksInPin,
                 archived: archived,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
